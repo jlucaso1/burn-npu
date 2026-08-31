@@ -79,10 +79,37 @@ fn detect_apple() -> Option<NpuInfo> {
     })
 }
 
+/// Peak ANE throughput for a given Apple Silicon brand string.
+///
+/// Apple published TOPS figures through M4 (38 TOPS) but has not disclosed one
+/// for the M5 or M6 Neural Engine, so those report the M4 figure as a
+/// documented floor rather than an invented number -- they are certainly not
+/// slower. An unrecognised chip gets the same floor: in practice "unknown"
+/// means newer than this table, and reporting M1-era numbers for an M6 (as
+/// this function previously did) is the worse failure.
+///
+/// Note that from M5 onward the Neural Engine is no longer the whole story:
+/// Apple put a Neural Accelerator in every GPU core, and much of the headline
+/// AI throughput on those parts lives there rather than on the ANE. This
+/// backend targets the ANE via MLTensor, so `tops` describes the ANE alone.
 #[cfg(target_os = "macos")]
 fn estimate_apple_tops(brand: &str) -> (f32, String) {
+    /// Apple's last published Neural Engine figure, used as a floor for
+    /// anything newer.
+    const PUBLISHED_FLOOR: f32 = 38.0;
+
     let lower = brand.to_lowercase();
-    if lower.contains("m4") {
+    if lower.contains("m6") {
+        (
+            PUBLISHED_FLOOR,
+            format!("Apple Neural Engine (M6, TOPS not published) -- {brand}"),
+        )
+    } else if lower.contains("m5") {
+        (
+            PUBLISHED_FLOOR,
+            format!("Apple Neural Engine (M5, TOPS not published) -- {brand}"),
+        )
+    } else if lower.contains("m4") {
         (38.0, format!("Apple Neural Engine (M4) -- {brand}"))
     } else if lower.contains("m3") {
         (18.0, format!("Apple Neural Engine (M3) -- {brand}"))
@@ -91,7 +118,32 @@ fn estimate_apple_tops(brand: &str) -> (f32, String) {
     } else if lower.contains("m1") {
         (11.0, format!("Apple Neural Engine (M1) -- {brand}"))
     } else {
-        (11.0, format!("Apple Neural Engine (unknown) -- {brand}"))
+        (
+            PUBLISHED_FLOOR,
+            format!("Apple Neural Engine (unrecognised chip) -- {brand}"),
+        )
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod apple_tests {
+    use super::estimate_apple_tops;
+
+    #[test]
+    fn newer_chips_are_not_reported_as_m1() {
+        for brand in ["Apple M5", "Apple M5 Ultra", "Apple M6 Max", "Apple M9"] {
+            let (tops, desc) = estimate_apple_tops(brand);
+            assert!(tops >= 38.0, "{brand} reported only {tops} TOPS");
+            assert!(desc.contains(brand));
+        }
+    }
+
+    #[test]
+    fn published_generations_keep_their_figures() {
+        assert_eq!(estimate_apple_tops("Apple M1 Pro").0, 11.0);
+        assert_eq!(estimate_apple_tops("Apple M2 Pro").0, 15.8);
+        assert_eq!(estimate_apple_tops("Apple M3 Max").0, 18.0);
+        assert_eq!(estimate_apple_tops("Apple M4").0, 38.0);
     }
 }
 

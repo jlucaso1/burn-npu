@@ -156,26 +156,25 @@ pub fn cpu_matmul(lhs: &QnnFloatTensor, rhs: &QnnFloatTensor) -> QnnFloatTensor 
 }
 
 // ---------------------------------------------------------------------------
-// Conversion helpers for NdArray interop
+// Conversion helpers for Flex interop
 // ---------------------------------------------------------------------------
 
-/// Convert QnnFloatTensor -> NdArrayTensor (for delegating ops to burn-ndarray).
-pub fn qnn_to_ndarray(tensor: &QnnFloatTensor) -> burn_ndarray::NdArrayTensor {
-    let array = ndarray::Array::from_shape_vec(ndarray::IxDyn(&tensor.shape), tensor.data.clone())
-        .unwrap()
-        .into_shared();
-    burn_ndarray::NdArrayTensor::from(array)
+/// Convert QnnFloatTensor -> FlexTensor (for delegating ops to burn-flex).
+pub fn qnn_to_ndarray(tensor: &QnnFloatTensor) -> burn_flex::FlexTensor {
+    burn_flex::FlexTensor::from_data(burn_tensor::TensorData::new(
+        tensor.data.clone(),
+        tensor.shape.clone(),
+    ))
 }
 
-/// Convert NdArrayTensor (f32) -> QnnFloatTensor.
-pub fn ndarray_to_qnn(tensor: &burn_ndarray::NdArrayTensor) -> QnnFloatTensor {
-    if let burn_ndarray::NdArrayTensor::F32(ref storage) = tensor {
-        let view = storage.view();
-        let contig = view.as_standard_layout();
-        let data = contig.as_slice().unwrap().to_vec();
-        let shape: Vec<usize> = view.shape().to_vec();
-        QnnFloatTensor::new(data, shape)
-    } else {
-        panic!("ndarray_to_qnn: expected F32 NdArrayTensor");
-    }
+/// Convert FlexTensor (f32) -> QnnFloatTensor.
+pub fn ndarray_to_qnn(tensor: &burn_flex::FlexTensor) -> QnnFloatTensor {
+    assert_eq!(
+        burn_tensor::TensorMetadata::dtype(tensor),
+        DType::F32,
+        "ndarray_to_qnn: expected an f32 tensor"
+    );
+    let contig = tensor.to_contiguous();
+    let shape = burn_tensor::TensorMetadata::shape(tensor).to_vec();
+    QnnFloatTensor::new(contig.storage::<f32>().to_vec(), shape)
 }

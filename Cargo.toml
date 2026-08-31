@@ -2,6 +2,8 @@
 name = "burn-npu"
 version = "0.3.1"
 edition = "2021"
+# burn 0.21 requires 1.89.
+rust-version = "1.89"
 description = "NPU backend for the Burn deep learning framework. Drop-in replacement that runs on Apple Neural Engine, Intel NPU, and Qualcomm Hexagon."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/frane/burn-npu"
@@ -15,23 +17,22 @@ intel = ["openvino", "openvino-sys"]
 qualcomm = []
 
 [dependencies]
-burn = { version = "0.20" }
-burn-tensor = { version = "0.20" }
-burn-ndarray = { version = "0.20" }
-ndarray = { version = "0.17" }
-openvino = { version = "0.7", optional = true, features = ["runtime-linking"] }
-openvino-sys = { version = "0.7", optional = true, features = ["runtime-linking"] }
+burn = { version = "0.21" }
+burn-tensor = { version = "0.21" }
+burn-flex = { version = "0.21" }
+openvino = { version = "0.11", optional = true, features = ["runtime-linking"] }
+openvino-sys = { version = "0.11", optional = true, features = ["runtime-linking"] }
 
 [dev-dependencies]
-burn = { version = "0.20" }
-burn-wgpu = { version = "0.20" }
-candle-core = { version = "0.8" }
-candle-nn = { version = "0.8" }
+burn = { version = "0.21" }
+burn-wgpu = { version = "0.21" }
+candle-core = { version = "0.11" }
+candle-nn = { version = "0.11" }
 reqwest = { version = "0.12", features = ["blocking"] }
-indicatif = "0.17"
-tokenizers = "0.21"
-safetensors = "0.4"
-dirs = "5"
+indicatif = "0.18"
+tokenizers = "0.23"
+safetensors = "0.8"
+dirs = "6"
 memmap2 = "0.9"
 
 [[example]]

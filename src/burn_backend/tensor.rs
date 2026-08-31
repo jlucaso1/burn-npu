@@ -1,9 +1,9 @@
 //! `NpuFloatTensor` type definitions and conversion helpers for all platforms.
 
 #[cfg(any(feature = "apple", feature = "intel", feature = "qualcomm"))]
-use burn_ndarray::NdArrayTensor;
+use burn_flex::FlexTensor;
 #[cfg(feature = "apple")]
-use burn_tensor::{DType, Shape};
+use burn_tensor::{DType, Shape, TensorData, TensorMetadata};
 
 // ---------------------------------------------------------------------------
 // NpuFloatTensor — MLTensor handle (apple only)
@@ -72,12 +72,12 @@ pub type NpuFloatTensor = crate::backends::qualcomm::QnnFloatTensor;
 // ===========================================================================
 
 #[cfg(feature = "intel")]
-pub(super) fn npu_to_ndarray(tensor: &NpuFloatTensor) -> NdArrayTensor {
+pub(super) fn npu_to_ndarray(tensor: &NpuFloatTensor) -> FlexTensor {
     crate::backends::intel::intel_to_ndarray(tensor)
 }
 
 #[cfg(feature = "intel")]
-pub(super) fn ndarray_to_npu(tensor: &NdArrayTensor) -> NpuFloatTensor {
+pub(super) fn ndarray_to_npu(tensor: &FlexTensor) -> NpuFloatTensor {
     crate::backends::intel::ndarray_to_intel(tensor)
 }
 
@@ -86,12 +86,12 @@ pub(super) fn ndarray_to_npu(tensor: &NdArrayTensor) -> NpuFloatTensor {
 // ===========================================================================
 
 #[cfg(feature = "qualcomm")]
-pub(super) fn npu_to_ndarray(tensor: &NpuFloatTensor) -> NdArrayTensor {
+pub(super) fn npu_to_ndarray(tensor: &NpuFloatTensor) -> FlexTensor {
     crate::backends::qualcomm::qnn_to_ndarray(tensor)
 }
 
 #[cfg(feature = "qualcomm")]
-pub(super) fn ndarray_to_npu(tensor: &NdArrayTensor) -> NpuFloatTensor {
+pub(super) fn ndarray_to_npu(tensor: &FlexTensor) -> NpuFloatTensor {
     crate::backends::qualcomm::ndarray_to_qnn(tensor)
 }
 
@@ -121,81 +121,81 @@ pub(super) fn read_int(handle: i32) -> (Vec<i32>, Vec<usize>) {
     (data, shape)
 }
 
+/// Read an integer FlexTensor as `i64`, whatever width it is stored at.
+///
+/// `IntElem` is `i32` to match burn-flex, but index buffers reaching the FFI
+/// are widened so a single code path covers both.
 #[cfg(feature = "apple")]
-pub(super) fn extract_i64(tensor: &NdArrayTensor) -> Vec<i64> {
-    if let NdArrayTensor::I64(ref storage) = tensor {
-        let view = storage.view();
-        let contig = view.as_standard_layout();
-        return contig.as_slice().unwrap().to_vec();
+pub(super) fn extract_i64(tensor: &FlexTensor) -> Vec<i64> {
+    let contig = tensor.to_contiguous();
+    match contig.dtype() {
+        DType::I64 => contig.storage::<i64>().to_vec(),
+        DType::I32 => contig.storage::<i32>().iter().map(|&v| v as i64).collect(),
+        other => panic!("extract_i64: expected an integer tensor, got {other:?}"),
     }
-    if let NdArrayTensor::I32(ref storage) = tensor {
-        let view = storage.view();
-        let contig = view.as_standard_layout();
-        return contig
-            .as_slice()
-            .unwrap()
-            .iter()
-            .map(|&v| v as i64)
-            .collect();
-    }
-    panic!("extract_i64: expected I64 or I32 NdArrayTensor");
 }
 
 #[cfg(feature = "apple")]
-pub(super) fn npu_to_ndarray(tensor: &NpuFloatTensor) -> NdArrayTensor {
+pub(super) fn npu_to_ndarray(tensor: &NpuFloatTensor) -> FlexTensor {
     let (data, shape) = read_f32(tensor.handle);
-    let array = ndarray::Array::from_shape_vec(ndarray::IxDyn(&shape), data)
-        .unwrap()
-        .into_shared();
-    NdArrayTensor::from(array)
+    FlexTensor::from_data(TensorData::new(data, shape))
 }
 
 #[cfg(feature = "apple")]
-pub(super) fn ndarray_to_npu(tensor: &NdArrayTensor) -> NpuFloatTensor {
-    if let NdArrayTensor::F32(ref storage) = tensor {
-        let view = storage.view();
-        let contig = view.as_standard_layout();
-        let data = contig.as_slice().unwrap();
-        let shape: Vec<i32> = view.shape().iter().map(|&d| d as i32).collect();
-        NpuFloatTensor {
-            handle: unsafe {
-                npu_create_tensor(
-                    shape.as_ptr(),
-                    shape.len() as i32,
-                    data.as_ptr(),
-                    data.len() as i32,
-                )
-            },
-        }
-    } else {
-        panic!("ndarray_to_npu: expected F32 NdArrayTensor");
+pub(super) fn ndarray_to_npu(tensor: &FlexTensor) -> NpuFloatTensor {
+    assert_eq!(
+        tensor.dtype(),
+        DType::F32,
+        "ndarray_to_npu: expected an f32 tensor"
+    );
+    let contig = tensor.to_contiguous();
+    let data = contig.storage::<f32>();
+    let shape: Vec<i32> = TensorMetadata::shape(tensor)
+        .iter()
+        .map(|&d| d as i32)
+        .collect();
+    NpuFloatTensor {
+        handle: unsafe {
+            npu_create_tensor(
+                shape.as_ptr(),
+                shape.len() as i32,
+                data.as_ptr(),
+                data.len() as i32,
+            )
+        },
     }
 }
 
 #[cfg(feature = "apple")]
 #[inline]
 pub(super) fn shape_i32(shape: &Shape) -> Vec<i32> {
-    shape.dims.iter().map(|&d| d as i32).collect()
+    shape.iter().map(|&d| d as i32).collect()
 }
 
 #[cfg(feature = "apple")]
-pub(super) fn int_handle_to_ndarray(handle: i32) -> NdArrayTensor {
+pub(super) fn int_handle_to_ndarray(handle: i32) -> FlexTensor {
     let (int_data, shape) = read_int(handle);
     unsafe { npu_free_tensor(handle) };
-    let i64_data: Vec<i64> = int_data.iter().map(|&v| v as i64).collect();
-    let array = ndarray::Array::from_shape_vec(ndarray::IxDyn(&shape), i64_data)
-        .unwrap()
-        .into_shared();
-    NdArrayTensor::from(array)
+    // IntElem is i32, matching both the MLTensor int payload and burn-flex.
+    FlexTensor::from_data(TensorData::new(int_data, shape))
+}
+
+/// Read a comparison result handle as a bool tensor, inverting it.
+///
+/// `greater_equal` is `NOT less` and `lower_equal` is `NOT greater`; MLTensor
+/// has no primitive for either, so both pairs go through here.
+#[cfg(feature = "apple")]
+pub(super) fn float_handle_to_inverted_bool(handle: i32) -> FlexTensor {
+    let (data, shape) = read_f32(handle);
+    unsafe { npu_free_tensor(handle) };
+    let bool_data: Vec<bool> = data.iter().map(|&v| v == 0.0).collect();
+    FlexTensor::from_data(TensorData::new(bool_data, shape))
 }
 
 #[cfg(feature = "apple")]
-pub(super) fn float_handle_to_bool_ndarray(handle: i32) -> NdArrayTensor {
+pub(super) fn float_handle_to_bool_ndarray(handle: i32) -> FlexTensor {
     let (data, shape) = read_f32(handle);
     unsafe { npu_free_tensor(handle) };
     let bool_data: Vec<bool> = data.iter().map(|&v| v != 0.0).collect();
-    let array = ndarray::Array::from_shape_vec(ndarray::IxDyn(&shape), bool_data)
-        .unwrap()
-        .into_shared();
-    NdArrayTensor::from(array)
+    FlexTensor::from_data(TensorData::new(bool_data, shape))
 }

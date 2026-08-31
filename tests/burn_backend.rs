@@ -177,7 +177,7 @@ fn max_min() {
 #[test]
 fn argmax_dim() {
     let a = Tensor::<B, 2>::from_floats([[1.0, 3.0, 2.0], [5.0, 4.0, 6.0]], &dev());
-    let idx: Vec<i64> = a.argmax(1).into_data().to_vec().unwrap();
+    let idx: Vec<i32> = a.argmax(1).into_data().to_vec().unwrap();
     assert_eq!(idx, vec![1, 2]);
 }
 
@@ -274,7 +274,7 @@ fn zeros_and_ones() {
 #[test]
 fn int_from_data() {
     let a = Tensor::<B, 1, burn::tensor::Int>::from_ints([1, 2, 3], &dev());
-    let d: Vec<i64> = a.into_data().to_vec().unwrap();
+    let d: Vec<i32> = a.into_data().to_vec().unwrap();
     assert_eq!(d, vec![1, 2, 3]);
 }
 

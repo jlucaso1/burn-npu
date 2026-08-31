@@ -174,8 +174,8 @@ fn main() {
     println!("{:<30} {:>12}   {:>9}", "Backend", "Latency", "Throughput");
     println!("{}", "─".repeat(58));
 
-    // NdArray (CPU)
-    run_bench::<burn_ndarray::NdArray>("burn-ndarray (CPU)", 10);
+    // Flex (CPU) — burn-flex replaced burn-ndarray as burn's CPU backend.
+    run_bench::<burn_flex::Flex>("burn-flex (CPU)", 10);
 
     // Wgpu (Metal/Vulkan GPU) — may not be available on all systems
     if std::panic::catch_unwind(|| run_bench::<burn_wgpu::Wgpu>("burn-wgpu (GPU)", 10)).is_err() {

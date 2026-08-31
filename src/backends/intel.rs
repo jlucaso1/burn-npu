@@ -342,26 +342,25 @@ pub fn cpu_matmul(lhs: &IntelFloatTensor, rhs: &IntelFloatTensor) -> IntelFloatT
 }
 
 // ---------------------------------------------------------------------------
-// Conversion helpers for NdArray interop
+// Conversion helpers for Flex interop
 // ---------------------------------------------------------------------------
 
-/// Convert IntelFloatTensor -> NdArrayTensor (for delegating ops to burn-ndarray).
-pub fn intel_to_ndarray(tensor: &IntelFloatTensor) -> burn_ndarray::NdArrayTensor {
-    let array = ndarray::Array::from_shape_vec(ndarray::IxDyn(&tensor.shape), tensor.data.clone())
-        .unwrap()
-        .into_shared();
-    burn_ndarray::NdArrayTensor::from(array)
+/// Convert IntelFloatTensor -> FlexTensor (for delegating ops to burn-flex).
+pub fn intel_to_ndarray(tensor: &IntelFloatTensor) -> burn_flex::FlexTensor {
+    burn_flex::FlexTensor::from_data(burn_tensor::TensorData::new(
+        tensor.data.clone(),
+        tensor.shape.clone(),
+    ))
 }
 
-/// Convert NdArrayTensor (f32) -> IntelFloatTensor.
-pub fn ndarray_to_intel(tensor: &burn_ndarray::NdArrayTensor) -> IntelFloatTensor {
-    if let burn_ndarray::NdArrayTensor::F32(ref storage) = tensor {
-        let view = storage.view();
-        let contig = view.as_standard_layout();
-        let data = contig.as_slice().unwrap().to_vec();
-        let shape: Vec<usize> = view.shape().to_vec();
-        IntelFloatTensor::new(data, shape)
-    } else {
-        panic!("ndarray_to_intel: expected F32 NdArrayTensor");
-    }
+/// Convert FlexTensor (f32) -> IntelFloatTensor.
+pub fn ndarray_to_intel(tensor: &burn_flex::FlexTensor) -> IntelFloatTensor {
+    assert_eq!(
+        burn_tensor::TensorMetadata::dtype(tensor),
+        DType::F32,
+        "ndarray_to_intel: expected an f32 tensor"
+    );
+    let contig = tensor.to_contiguous();
+    let shape = burn_tensor::TensorMetadata::shape(tensor).to_vec();
+    IntelFloatTensor::new(contig.storage::<f32>().to_vec(), shape)
 }

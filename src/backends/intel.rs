@@ -14,9 +14,33 @@ use burn_tensor::{DType, Shape};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+/// Returned when the OpenVINO runtime, device, or model is unavailable and the
+/// caller should transparently fall back to the CPU implementation.
+///
+/// This is an expected control-flow signal, not an exceptional condition: the
+/// `intel` feature is compiled with `runtime-linking`, so a machine without the
+/// OpenVINO runtime installed reaches this on every call.
+#[cfg(feature = "intel")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpenVinoUnavailable;
+
+#[cfg(feature = "intel")]
+impl std::fmt::Display for OpenVinoUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("OpenVINO runtime or device unavailable; falling back to CPU")
+    }
+}
+
+#[cfg(feature = "intel")]
+impl std::error::Error for OpenVinoUnavailable {}
+
+/// Compiled-model cache keyed by matmul shape.
+#[cfg(feature = "intel")]
+type OvCache = Mutex<HashMap<(usize, usize, usize), OvCompiledMatmul>>;
+
 // Cache compiled OpenVINO models by (m, k, n) shape to avoid recompilation per call.
 #[cfg(feature = "intel")]
-static OV_CACHE: std::sync::LazyLock<Mutex<HashMap<(usize, usize, usize), OvCompiledMatmul>>> =
+static OV_CACHE: std::sync::LazyLock<OvCache> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[cfg(feature = "intel")]
@@ -26,8 +50,8 @@ struct OvCompiledMatmul {
 
 /// Load the OpenVINO shared library (required for runtime-linking feature).
 #[cfg(feature = "intel")]
-fn ensure_openvino_loaded() -> Result<(), ()> {
-    openvino_sys::load().map_err(|_| ())
+fn ensure_openvino_loaded() -> Result<(), OpenVinoUnavailable> {
+    openvino_sys::load().map_err(|_| OpenVinoUnavailable)
 }
 
 // ---------------------------------------------------------------------------
@@ -112,12 +136,12 @@ impl burn_tensor::TensorMetadata for IntelFloatTensor {
 ///
 /// Dispatch matmul to OpenVINO NPU. Handles batched (3D+) tensors by looping
 /// over batch dims and running each 2D slice on NPU.
-/// Returns `Err(())` if OpenVINO runtime is unavailable.
+/// Returns [`OpenVinoUnavailable`] if the OpenVINO runtime is unavailable.
 #[cfg(feature = "intel")]
 pub fn openvino_matmul(
     lhs: &IntelFloatTensor,
     rhs: &IntelFloatTensor,
-) -> Result<IntelFloatTensor, ()> {
+) -> Result<IntelFloatTensor, OpenVinoUnavailable> {
     use openvino::{Core, DeviceType, ElementType, Shape as OvShape, Tensor as OvTensor};
 
     ensure_openvino_loaded()?;
@@ -125,7 +149,7 @@ pub fn openvino_matmul(
     let lhs_ndim = lhs.shape.len();
     let rhs_ndim = rhs.shape.len();
     if lhs_ndim < 2 || rhs_ndim < 2 {
-        return Err(());
+        return Err(OpenVinoUnavailable);
     }
 
     let m = lhs.shape[lhs_ndim - 2];
@@ -134,7 +158,7 @@ pub fn openvino_matmul(
 
     // Skip OpenVINO overhead for small matmuls
     if m * k * n < 4096 {
-        return Err(());
+        return Err(OpenVinoUnavailable);
     }
 
     // Compute batch dimensions: everything before the last 2 dims
@@ -142,7 +166,7 @@ pub fn openvino_matmul(
     let rhs_batch: Vec<usize> = rhs.shape[..rhs_ndim - 2].to_vec();
     // Batch shapes must match (or be empty for 2D)
     if lhs_batch != rhs_batch {
-        return Err(());
+        return Err(OpenVinoUnavailable);
     }
     let batch_size: usize = lhs_batch.iter().product::<usize>().max(1);
 
@@ -150,15 +174,17 @@ pub fn openvino_matmul(
     let rhs_stride = k * n; // elements per batch slice in rhs
     let out_stride = m * n;
 
-    let lhs_ov_shape = OvShape::new(&[m as i64, k as i64]).map_err(|_| ())?;
-    let rhs_ov_shape = OvShape::new(&[k as i64, n as i64]).map_err(|_| ())?;
+    let lhs_ov_shape = OvShape::new(&[m as i64, k as i64]).map_err(|_| OpenVinoUnavailable)?;
+    let rhs_ov_shape = OvShape::new(&[k as i64, n as i64]).map_err(|_| OpenVinoUnavailable)?;
 
     // Get or compile the model for this (m, k, n) shape — cached across calls
     let cache_key = (m, k, n);
-    let mut cache = OV_CACHE.lock().map_err(|_| ())?;
-    if !cache.contains_key(&cache_key) {
-        let ir_xml = format!(
-            r#"<?xml version="1.0"?>
+    let mut cache = OV_CACHE.lock().map_err(|_| OpenVinoUnavailable)?;
+    let entry = match cache.entry(cache_key) {
+        std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+        std::collections::hash_map::Entry::Vacant(slot) => {
+            let ir_xml = format!(
+                r#"<?xml version="1.0"?>
 <net name="matmul" version="11">
   <layers>
     <layer id="0" name="lhs" type="Parameter" version="opset1">
@@ -187,30 +213,30 @@ pub fn openvino_matmul(
     <edge from-layer="2" from-port="2" to-layer="3" to-port="0"/>
   </edges>
 </net>"#
-        );
+            );
 
-        let mut core = Core::new().map_err(|_| ())?;
-        let model = core
-            .read_model_from_buffer(ir_xml.as_bytes(), None)
-            .map_err(|_| ())?;
+            let mut core = Core::new().map_err(|_| OpenVinoUnavailable)?;
+            let model = core
+                .read_model_from_buffer(ir_xml.as_bytes(), None)
+                .map_err(|_| OpenVinoUnavailable)?;
 
-        let devices = [DeviceType::NPU, DeviceType::GPU, DeviceType::CPU];
-        let mut compiled = None;
-        for dev in &devices {
-            if let Ok(c) = core.compile_model(&model, dev.to_owned()) {
-                compiled = Some(c);
-                break;
+            let devices = [DeviceType::NPU, DeviceType::GPU, DeviceType::CPU];
+            let mut compiled = None;
+            for dev in &devices {
+                if let Ok(c) = core.compile_model(&model, dev.to_owned()) {
+                    compiled = Some(c);
+                    break;
+                }
             }
+            slot.insert(OvCompiledMatmul {
+                compiled: compiled.ok_or(OpenVinoUnavailable)?,
+            })
         }
-        cache.insert(
-            cache_key,
-            OvCompiledMatmul {
-                compiled: compiled.ok_or(())?,
-            },
-        );
-    }
-    let entry = cache.get_mut(&cache_key).unwrap();
-    let mut request = entry.compiled.create_infer_request().map_err(|_| ())?;
+    };
+    let mut request = entry
+        .compiled
+        .create_infer_request()
+        .map_err(|_| OpenVinoUnavailable)?;
     drop(cache); // release lock before running inference
 
     // Run each batch slice through the compiled model
@@ -219,28 +245,36 @@ pub fn openvino_matmul(
         let lhs_off = b * lhs_stride;
         let rhs_off = b * rhs_stride;
 
-        let mut lt = OvTensor::new(ElementType::F32, &lhs_ov_shape).map_err(|_| ())?;
-        let lt_buf = lt.get_data_mut::<f32>().map_err(|_| ())?;
+        let mut lt =
+            OvTensor::new(ElementType::F32, &lhs_ov_shape).map_err(|_| OpenVinoUnavailable)?;
+        let lt_buf = lt.get_data_mut::<f32>().map_err(|_| OpenVinoUnavailable)?;
         if lt_buf.len() != lhs_stride {
-            return Err(());
+            return Err(OpenVinoUnavailable);
         }
         lt_buf.copy_from_slice(&lhs.data[lhs_off..lhs_off + lhs_stride]);
 
-        let mut rt = OvTensor::new(ElementType::F32, &rhs_ov_shape).map_err(|_| ())?;
-        let rt_buf = rt.get_data_mut::<f32>().map_err(|_| ())?;
+        let mut rt =
+            OvTensor::new(ElementType::F32, &rhs_ov_shape).map_err(|_| OpenVinoUnavailable)?;
+        let rt_buf = rt.get_data_mut::<f32>().map_err(|_| OpenVinoUnavailable)?;
         if rt_buf.len() != rhs_stride {
-            return Err(());
+            return Err(OpenVinoUnavailable);
         }
         rt_buf.copy_from_slice(&rhs.data[rhs_off..rhs_off + rhs_stride]);
 
-        request.set_input_tensor_by_index(0, &lt).map_err(|_| ())?;
-        request.set_input_tensor_by_index(1, &rt).map_err(|_| ())?;
-        request.infer().map_err(|_| ())?;
+        request
+            .set_input_tensor_by_index(0, &lt)
+            .map_err(|_| OpenVinoUnavailable)?;
+        request
+            .set_input_tensor_by_index(1, &rt)
+            .map_err(|_| OpenVinoUnavailable)?;
+        request.infer().map_err(|_| OpenVinoUnavailable)?;
 
-        let output = request.get_output_tensor_by_index(0).map_err(|_| ())?;
-        let out_buf = output.get_data::<f32>().map_err(|_| ())?;
+        let output = request
+            .get_output_tensor_by_index(0)
+            .map_err(|_| OpenVinoUnavailable)?;
+        let out_buf = output.get_data::<f32>().map_err(|_| OpenVinoUnavailable)?;
         if out_buf.len() != out_stride {
-            return Err(());
+            return Err(OpenVinoUnavailable);
         }
         result_data.extend_from_slice(out_buf);
     }

@@ -1211,19 +1211,18 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
     // ── Matmul ──────────────────────────────────────────────────────────
 
     fn float_matmul(lhs: FloatTensor<Self>, rhs: FloatTensor<Self>) -> FloatTensor<Self> {
-        // Intel: try OpenVINO NPU for large matmuls
+        // Intel: try OpenVINO NPU for large matmuls, else CPU.
+        // Takes precedence if both features are somehow enabled at once.
         #[cfg(feature = "intel")]
         {
-            if let Ok(result) = crate::backends::intel::openvino_matmul(&lhs, &rhs) {
-                return result;
-            }
-            return crate::backends::intel::cpu_matmul(&lhs, &rhs);
+            crate::backends::intel::openvino_matmul(&lhs, &rhs)
+                .unwrap_or_else(|_| crate::backends::intel::cpu_matmul(&lhs, &rhs))
         }
 
         // Qualcomm: CPU matmul (TODO: QNN HTP dispatch)
-        #[cfg(feature = "qualcomm")]
+        #[cfg(all(feature = "qualcomm", not(feature = "intel")))]
         {
-            return crate::backends::qualcomm::cpu_matmul(&lhs, &rhs);
+            crate::backends::qualcomm::cpu_matmul(&lhs, &rhs)
         }
     }
 

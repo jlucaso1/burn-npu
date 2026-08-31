@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    # Weekly. Cargo.lock is not committed, so this is what catches upstream
+    # breakage before it becomes a four-month-old broken release.
+    - cron: '0 6 * * 1'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  lint:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --features intel --all-targets -- -D warnings
+      - run: cargo clippy --features qualcomm --all-targets -- -D warnings
+
+  # Every feature must at least compile on Linux. The `intel` feature uses
+  # openvino runtime-linking, so it builds without the OpenVINO runtime present.
+  check-linux:
+    name: check (${{ matrix.feature }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        feature: [default, intel, qualcomm]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo check
+        run: |
+          if [ "${{ matrix.feature }}" = "default" ]; then
+            cargo check --all-targets
+          else
+            cargo check --features ${{ matrix.feature }} --all-targets
+          fi
+
+  # The apple feature needs macOS 15+ for MLTensor and swiftc for npu-sys.
+  # This is the only job that runs the test suite against real NPU dispatch.
+  test-apple:
+    name: test (apple, macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: swiftc --version
+      - run: cargo test --features apple
+      - run: cargo test

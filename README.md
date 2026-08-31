@@ -60,7 +60,7 @@ cargo run --release --example bench --features apple
 
 ```toml
 [dependencies]
-burn-npu = { version = "0.3", features = ["apple"] }
+burn-npu = { version = "0.4", features = ["apple"] }
 ```
 
 | Feature | Hardware | Status | Requires |

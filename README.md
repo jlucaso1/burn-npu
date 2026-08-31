@@ -2,7 +2,7 @@
 
 > **Early development.** Apple backend tested and working. Intel and Qualcomm implemented but need hardware validation. Contributions welcome.
 
-NPU backend for [Burn](https://burn.dev). Drop-in replacement for `burn-wgpu` or `burn-ndarray` that runs inference on hardware Neural Processing Units.
+NPU backend for [Burn](https://burn.dev). Drop-in replacement for `burn-wgpu` or `burn-flex` that runs inference on hardware Neural Processing Units.
 
 ```rust
 use burn::tensor::Tensor;
@@ -40,6 +40,11 @@ GPT-2 124M forward pass, seq=32, FP32, Apple M2 Pro.
 | burn-wgpu (Metal GPU) | 37 ms | 27.1 tok/s |
 | burn-ndarray (CPU) | 107 ms | 9.4 tok/s |
 
+> These numbers were measured against burn 0.20 and have **not** been re-run
+> since the burn 0.21 / burn-flex migration. The CPU baseline is now burn-flex,
+> which is SIMD-accelerated where burn-ndarray was not, so expect the CPU row in
+> particular to have moved.
+
 ```bash
 cargo run --release --example bench --features apple
 ```
@@ -57,7 +62,7 @@ burn-npu = { version = "0.3", features = ["apple"] }
 | `intel` | Intel Core Ultra NPU | implemented, needs hardware validation | OpenVINO runtime |
 | `qualcomm` | Qualcomm Hexagon (Snapdragon) | implemented, needs hardware + QNN SDK | QNN SDK |
 
-Enable one feature at a time. Without any feature, falls back to burn-ndarray (CPU).
+Enable one feature at a time. Without any feature, falls back to burn-flex (CPU).
 
 ## How It Works
 
@@ -69,7 +74,7 @@ Each platform has a native tensor type that stays on the NPU between operations.
 | Intel | OpenVINO tensor | NPU / GPU / CPU via OpenVINO |
 | Qualcomm | QNN tensor (planned) | CPU fallback until QNN SDK integrated |
 
-On Apple, 37 float ops run natively on the NPU. On Intel, matmul is NPU-accelerated via OpenVINO. Remaining ops and int/bool tensors delegate to burn-ndarray.
+On Apple, 37 float ops run natively on the NPU. On Intel, matmul is NPU-accelerated via OpenVINO. Remaining ops and int/bool tensors delegate to burn-flex.
 
 ## Background
 
@@ -81,7 +86,7 @@ This is an early project. Help is welcome:
 
 - **Intel hardware testing** — run `cargo test --features intel` on a Core Ultra machine and open an issue with results
 - **Qualcomm hardware testing** — if you have a Snapdragon X Elite device or Rubik Pi 3, help integrate the QNN SDK
-- **More NPU-accelerated ops** — move remaining float ops from burn-ndarray delegation to native NPU execution on Intel/Qualcomm
+- **More NPU-accelerated ops** — move remaining float ops from burn-flex delegation to native NPU execution on Intel/Qualcomm
 - **Bug reports** — if a Burn model doesn't work on `NpuBurnBackend`, open an issue
 
 ## License

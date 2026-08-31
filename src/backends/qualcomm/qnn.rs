@@ -51,7 +51,12 @@ const HTP_LIBRARIES: &[&str] = &["libQnnHtp.so", "QnnHtp.dll", "libQnnHtp.dylib"
 struct QnnRuntime {
     /// Function-pointer table taken from the selected provider.
     iface: sys::QNN_INTERFACE_VER_TYPE,
+    /// Held for the process lifetime: the context below is only valid while
+    /// its backend and device are alive. Never read after construction, since
+    /// `RUNTIME` is a `static` that is never dropped.
+    #[allow(dead_code)]
     backend: sys::Qnn_BackendHandle_t,
+    #[allow(dead_code)]
     device: sys::Qnn_DeviceHandle_t,
     context: sys::Qnn_ContextHandle_t,
     /// Finalized matmul graphs, keyed by `(m, k, n)`.

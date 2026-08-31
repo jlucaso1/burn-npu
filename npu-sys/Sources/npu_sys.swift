@@ -64,54 +64,53 @@ public func npuGetShape(id: Int32, outPtr: UnsafeMutablePointer<Int32>, maxDims:
     return Int32(s.count)
 }
 
+// ── Async → sync bridge ──
+//
+// MLTensor materialises lazily and asynchronously, but the C ABI is
+// synchronous. Callers always arrive on Rust-owned threads, never on Swift's
+// cooperative pool, so blocking one of them here cannot starve the executor
+// running the task.
+//
+// This previously spawned a fresh OS thread per readback and spun a RunLoop at
+// 0.1 ms until the task finished. Every comparison op and every `into_data`
+// pays this cost, so it is worth keeping cheap.
+private func blockingRead(_ body: @escaping @Sendable () async -> Int32) -> Int32 {
+    let sem = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var result: Int32 = -1
+    Task.detached(priority: .userInitiated) {
+        result = await body()
+        sem.signal()
+    }
+    sem.wait()
+    return result
+}
+
 @_cdecl("npu_get_data")
 public func npuGetData(id: Int32, outPtr: UnsafeMutablePointer<Float>, maxLen: Int32) -> Int32 {
     guard let t = get(id) else { return -1 }
-    let sem = DispatchSemaphore(value: 0)
-    var count: Int32 = -1
-    let tensor = t
     let capturedMax = Int(maxLen)
-    Thread.detachNewThread {
-        let r = RunLoop.current
-        nonisolated(unsafe) var done = false
-        Task {
-            let arr = await tensor.shapedArray(of: Float.self)
-            let flat = arr.scalars
-            let n = min(flat.count, capturedMax)
-            for i in 0..<n { outPtr[i] = flat[i] }
-            count = Int32(n)
-            done = true
-            sem.signal()
-        }
-        while !done { r.run(mode: .default, before: Date(timeIntervalSinceNow: 0.0001)) }
+    nonisolated(unsafe) let out = outPtr
+    nonisolated(unsafe) let tensor = t
+    return blockingRead {
+        let flat = await tensor.shapedArray(of: Float.self).scalars
+        let n = min(flat.count, capturedMax)
+        for i in 0..<n { out[i] = flat[i] }
+        return Int32(n)
     }
-    sem.wait()
-    return count
 }
 
 @_cdecl("npu_get_int_data")
 public func npuGetIntData(id: Int32, outPtr: UnsafeMutablePointer<Int32>, maxLen: Int32) -> Int32 {
     guard let t = get(id) else { return -1 }
-    let sem = DispatchSemaphore(value: 0)
-    var count: Int32 = -1
-    let tensor = t
     let capturedMax = Int(maxLen)
-    Thread.detachNewThread {
-        let r = RunLoop.current
-        nonisolated(unsafe) var done = false
-        Task {
-            let arr = await tensor.shapedArray(of: Int32.self)
-            let flat = arr.scalars
-            let n = min(flat.count, capturedMax)
-            for i in 0..<n { outPtr[i] = flat[i] }
-            count = Int32(n)
-            done = true
-            sem.signal()
-        }
-        while !done { r.run(mode: .default, before: Date(timeIntervalSinceNow: 0.0001)) }
+    nonisolated(unsafe) let out = outPtr
+    nonisolated(unsafe) let tensor = t
+    return blockingRead {
+        let flat = await tensor.shapedArray(of: Int32.self).scalars
+        let n = min(flat.count, capturedMax)
+        for i in 0..<n { out[i] = flat[i] }
+        return Int32(n)
     }
-    sem.wait()
-    return count
 }
 
 @_cdecl("npu_scalar_tensor")

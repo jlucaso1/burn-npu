@@ -45,3 +45,7 @@ memmap2 = "0.9"
 [[example]]
 name = "bench"
 path = "examples/bench.rs"
+
+[[example]]
+name = "readback_bench"
+path = "examples/readback_bench.rs"

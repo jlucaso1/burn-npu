@@ -22,8 +22,12 @@ impl IntTensorOps<Self> for NpuBurnBackend {
         <Nd as IntTensorOps<Nd>>::int_into_data(tensor).await
     }
 
-    fn int_device(_tensor: &IntTensor<Self>) -> NpuBurnDevice { NpuBurnDevice::Default }
-    fn int_to_device(tensor: IntTensor<Self>, _device: &NpuBurnDevice) -> IntTensor<Self> { tensor }
+    fn int_device(_tensor: &IntTensor<Self>) -> NpuBurnDevice {
+        NpuBurnDevice::Default
+    }
+    fn int_to_device(tensor: IntTensor<Self>, _device: &NpuBurnDevice) -> IntTensor<Self> {
+        tensor
+    }
 
     fn int_empty(shape: Shape, _device: &NpuBurnDevice, dtype: IntDType) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_empty(shape, &nd_dev(), dtype)
@@ -34,10 +38,19 @@ impl IntTensorOps<Self> for NpuBurnBackend {
     fn int_ones(shape: Shape, _device: &NpuBurnDevice, dtype: IntDType) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_ones(shape, &nd_dev(), dtype)
     }
-    fn int_full(shape: Shape, fill_value: i64, _device: &NpuBurnDevice, dtype: IntDType) -> IntTensor<Self> {
+    fn int_full(
+        shape: Shape,
+        fill_value: i64,
+        _device: &NpuBurnDevice,
+        dtype: IntDType,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_full(shape, fill_value, &nd_dev(), dtype)
     }
-    fn int_random(shape: Shape, distribution: Distribution, _device: &NpuBurnDevice) -> IntTensor<Self> {
+    fn int_random(
+        shape: Shape,
+        distribution: Distribution,
+        _device: &NpuBurnDevice,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_random(shape, distribution, &nd_dev())
     }
 
@@ -47,7 +60,11 @@ impl IntTensorOps<Self> for NpuBurnBackend {
     fn int_slice(tensor: IntTensor<Self>, slices: &[Slice]) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_slice(tensor, slices)
     }
-    fn int_slice_assign(tensor: IntTensor<Self>, slices: &[Slice], value: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_slice_assign(
+        tensor: IntTensor<Self>,
+        slices: &[Slice],
+        value: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_slice_assign(tensor, slices, value)
     }
 
@@ -56,23 +73,49 @@ impl IntTensorOps<Self> for NpuBurnBackend {
         ndarray_to_npu(&nd_float)
     }
 
-    fn int_mask_where(tensor: IntTensor<Self>, mask: BoolTensor<Self>, value: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_mask_where(
+        tensor: IntTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_mask_where(tensor, mask, value)
     }
-    fn int_mask_fill(tensor: IntTensor<Self>, mask: BoolTensor<Self>, value: i64) -> IntTensor<Self> {
+    fn int_mask_fill(
+        tensor: IntTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: i64,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_mask_fill(tensor, mask, value)
     }
 
-    fn int_gather(dim: usize, tensor: IntTensor<Self>, indices: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_gather(
+        dim: usize,
+        tensor: IntTensor<Self>,
+        indices: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_gather(dim, tensor, indices)
     }
-    fn int_scatter_add(dim: usize, tensor: IntTensor<Self>, indices: IntTensor<Self>, value: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_scatter_add(
+        dim: usize,
+        tensor: IntTensor<Self>,
+        indices: IntTensor<Self>,
+        value: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_scatter_add(dim, tensor, indices, value)
     }
-    fn int_select(tensor: IntTensor<Self>, dim: usize, indices: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_select(
+        tensor: IntTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_select(tensor, dim, indices)
     }
-    fn int_select_add(tensor: IntTensor<Self>, dim: usize, indices: IntTensor<Self>, value: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_select_add(
+        tensor: IntTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+        value: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_select_add(tensor, dim, indices, value)
     }
 
@@ -273,7 +316,12 @@ impl IntTensorOps<Self> for NpuBurnBackend {
     fn int_cast(tensor: IntTensor<Self>, dtype: IntDType) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_cast(tensor, dtype)
     }
-    fn int_unfold(tensor: IntTensor<Self>, dim: usize, size: usize, step: usize) -> IntTensor<Self> {
+    fn int_unfold(
+        tensor: IntTensor<Self>,
+        dim: usize,
+        size: usize,
+        step: usize,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_unfold(tensor, dim, size, step)
     }
 }
@@ -291,8 +339,12 @@ impl IntTensorOps<Self> for NpuBurnBackend {
         <Nd as IntTensorOps<Nd>>::int_into_data(tensor).await
     }
 
-    fn int_device(_tensor: &IntTensor<Self>) -> NpuBurnDevice { NpuBurnDevice::Default }
-    fn int_to_device(tensor: IntTensor<Self>, _device: &NpuBurnDevice) -> IntTensor<Self> { tensor }
+    fn int_device(_tensor: &IntTensor<Self>) -> NpuBurnDevice {
+        NpuBurnDevice::Default
+    }
+    fn int_to_device(tensor: IntTensor<Self>, _device: &NpuBurnDevice) -> IntTensor<Self> {
+        tensor
+    }
 
     fn int_empty(shape: Shape, _device: &NpuBurnDevice, dtype: IntDType) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_empty(shape, &nd_dev(), dtype)
@@ -303,10 +355,19 @@ impl IntTensorOps<Self> for NpuBurnBackend {
     fn int_ones(shape: Shape, _device: &NpuBurnDevice, dtype: IntDType) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_ones(shape, &nd_dev(), dtype)
     }
-    fn int_full(shape: Shape, fill_value: i64, _device: &NpuBurnDevice, dtype: IntDType) -> IntTensor<Self> {
+    fn int_full(
+        shape: Shape,
+        fill_value: i64,
+        _device: &NpuBurnDevice,
+        dtype: IntDType,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_full(shape, fill_value, &nd_dev(), dtype)
     }
-    fn int_random(shape: Shape, distribution: Distribution, _device: &NpuBurnDevice) -> IntTensor<Self> {
+    fn int_random(
+        shape: Shape,
+        distribution: Distribution,
+        _device: &NpuBurnDevice,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_random(shape, distribution, &nd_dev())
     }
 
@@ -316,7 +377,11 @@ impl IntTensorOps<Self> for NpuBurnBackend {
     fn int_slice(tensor: IntTensor<Self>, slices: &[Slice]) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_slice(tensor, slices)
     }
-    fn int_slice_assign(tensor: IntTensor<Self>, slices: &[Slice], value: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_slice_assign(
+        tensor: IntTensor<Self>,
+        slices: &[Slice],
+        value: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_slice_assign(tensor, slices, value)
     }
 
@@ -324,23 +389,49 @@ impl IntTensorOps<Self> for NpuBurnBackend {
         <Nd as IntTensorOps<Nd>>::int_into_float(tensor)
     }
 
-    fn int_mask_where(tensor: IntTensor<Self>, mask: BoolTensor<Self>, value: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_mask_where(
+        tensor: IntTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_mask_where(tensor, mask, value)
     }
-    fn int_mask_fill(tensor: IntTensor<Self>, mask: BoolTensor<Self>, value: i64) -> IntTensor<Self> {
+    fn int_mask_fill(
+        tensor: IntTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: i64,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_mask_fill(tensor, mask, value)
     }
 
-    fn int_gather(dim: usize, tensor: IntTensor<Self>, indices: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_gather(
+        dim: usize,
+        tensor: IntTensor<Self>,
+        indices: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_gather(dim, tensor, indices)
     }
-    fn int_scatter_add(dim: usize, tensor: IntTensor<Self>, indices: IntTensor<Self>, value: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_scatter_add(
+        dim: usize,
+        tensor: IntTensor<Self>,
+        indices: IntTensor<Self>,
+        value: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_scatter_add(dim, tensor, indices, value)
     }
-    fn int_select(tensor: IntTensor<Self>, dim: usize, indices: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_select(
+        tensor: IntTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_select(tensor, dim, indices)
     }
-    fn int_select_add(tensor: IntTensor<Self>, dim: usize, indices: IntTensor<Self>, value: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_select_add(
+        tensor: IntTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+        value: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_select_add(tensor, dim, indices, value)
     }
 
@@ -540,7 +631,12 @@ impl IntTensorOps<Self> for NpuBurnBackend {
     fn int_cast(tensor: IntTensor<Self>, dtype: IntDType) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_cast(tensor, dtype)
     }
-    fn int_unfold(tensor: IntTensor<Self>, dim: usize, size: usize, step: usize) -> IntTensor<Self> {
+    fn int_unfold(
+        tensor: IntTensor<Self>,
+        dim: usize,
+        size: usize,
+        step: usize,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_unfold(tensor, dim, size, step)
     }
 }
@@ -558,8 +654,12 @@ impl IntTensorOps<Self> for NpuBurnBackend {
         <Nd as IntTensorOps<Nd>>::int_into_data(tensor).await
     }
 
-    fn int_device(_tensor: &IntTensor<Self>) -> NpuBurnDevice { NpuBurnDevice::Default }
-    fn int_to_device(tensor: IntTensor<Self>, _device: &NpuBurnDevice) -> IntTensor<Self> { tensor }
+    fn int_device(_tensor: &IntTensor<Self>) -> NpuBurnDevice {
+        NpuBurnDevice::Default
+    }
+    fn int_to_device(tensor: IntTensor<Self>, _device: &NpuBurnDevice) -> IntTensor<Self> {
+        tensor
+    }
 
     fn int_empty(shape: Shape, _device: &NpuBurnDevice, dtype: IntDType) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_empty(shape, &nd_dev(), dtype)
@@ -570,10 +670,19 @@ impl IntTensorOps<Self> for NpuBurnBackend {
     fn int_ones(shape: Shape, _device: &NpuBurnDevice, dtype: IntDType) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_ones(shape, &nd_dev(), dtype)
     }
-    fn int_full(shape: Shape, fill_value: i64, _device: &NpuBurnDevice, dtype: IntDType) -> IntTensor<Self> {
+    fn int_full(
+        shape: Shape,
+        fill_value: i64,
+        _device: &NpuBurnDevice,
+        dtype: IntDType,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_full(shape, fill_value, &nd_dev(), dtype)
     }
-    fn int_random(shape: Shape, distribution: Distribution, _device: &NpuBurnDevice) -> IntTensor<Self> {
+    fn int_random(
+        shape: Shape,
+        distribution: Distribution,
+        _device: &NpuBurnDevice,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_random(shape, distribution, &nd_dev())
     }
 
@@ -583,7 +692,11 @@ impl IntTensorOps<Self> for NpuBurnBackend {
     fn int_slice(tensor: IntTensor<Self>, slices: &[Slice]) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_slice(tensor, slices)
     }
-    fn int_slice_assign(tensor: IntTensor<Self>, slices: &[Slice], value: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_slice_assign(
+        tensor: IntTensor<Self>,
+        slices: &[Slice],
+        value: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_slice_assign(tensor, slices, value)
     }
 
@@ -592,23 +705,49 @@ impl IntTensorOps<Self> for NpuBurnBackend {
         ndarray_to_npu(&nd_float)
     }
 
-    fn int_mask_where(tensor: IntTensor<Self>, mask: BoolTensor<Self>, value: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_mask_where(
+        tensor: IntTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_mask_where(tensor, mask, value)
     }
-    fn int_mask_fill(tensor: IntTensor<Self>, mask: BoolTensor<Self>, value: i64) -> IntTensor<Self> {
+    fn int_mask_fill(
+        tensor: IntTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: i64,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_mask_fill(tensor, mask, value)
     }
 
-    fn int_gather(dim: usize, tensor: IntTensor<Self>, indices: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_gather(
+        dim: usize,
+        tensor: IntTensor<Self>,
+        indices: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_gather(dim, tensor, indices)
     }
-    fn int_scatter_add(dim: usize, tensor: IntTensor<Self>, indices: IntTensor<Self>, value: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_scatter_add(
+        dim: usize,
+        tensor: IntTensor<Self>,
+        indices: IntTensor<Self>,
+        value: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_scatter_add(dim, tensor, indices, value)
     }
-    fn int_select(tensor: IntTensor<Self>, dim: usize, indices: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_select(
+        tensor: IntTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_select(tensor, dim, indices)
     }
-    fn int_select_add(tensor: IntTensor<Self>, dim: usize, indices: IntTensor<Self>, value: IntTensor<Self>) -> IntTensor<Self> {
+    fn int_select_add(
+        tensor: IntTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+        value: IntTensor<Self>,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_select_add(tensor, dim, indices, value)
     }
 
@@ -809,7 +948,12 @@ impl IntTensorOps<Self> for NpuBurnBackend {
     fn int_cast(tensor: IntTensor<Self>, dtype: IntDType) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_cast(tensor, dtype)
     }
-    fn int_unfold(tensor: IntTensor<Self>, dim: usize, size: usize, step: usize) -> IntTensor<Self> {
+    fn int_unfold(
+        tensor: IntTensor<Self>,
+        dim: usize,
+        size: usize,
+        step: usize,
+    ) -> IntTensor<Self> {
         <Nd as IntTensorOps<Nd>>::int_unfold(tensor, dim, size, step)
     }
 }

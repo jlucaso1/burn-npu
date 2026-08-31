@@ -1,4 +1,4 @@
-use burn::tensor::{Tensor, Shape};
+use burn::tensor::{Shape, Tensor};
 use burn_npu::{NpuBurnBackend, NpuBurnDevice};
 
 type B = NpuBurnBackend;
@@ -133,7 +133,10 @@ fn sin_cos_identity() {
     let a = Tensor::<B, 1>::from_floats([0.0, 1.0, 2.0, 3.0], &dev());
     let s = a.clone().sin();
     let c = a.cos();
-    let sum: Vec<f32> = (s.clone() * s + c.clone() * c).into_data().to_vec().unwrap();
+    let sum: Vec<f32> = (s.clone() * s + c.clone() * c)
+        .into_data()
+        .to_vec()
+        .unwrap();
     for v in &sum {
         assert!((v - 1.0).abs() < 1e-4, "sin^2+cos^2 = {v}, expected 1.0");
     }

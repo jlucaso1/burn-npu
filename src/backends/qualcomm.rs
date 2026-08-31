@@ -161,10 +161,9 @@ pub fn cpu_matmul(lhs: &QnnFloatTensor, rhs: &QnnFloatTensor) -> QnnFloatTensor 
 
 /// Convert QnnFloatTensor -> NdArrayTensor (for delegating ops to burn-ndarray).
 pub fn qnn_to_ndarray(tensor: &QnnFloatTensor) -> burn_ndarray::NdArrayTensor {
-    let array =
-        ndarray::Array::from_shape_vec(ndarray::IxDyn(&tensor.shape), tensor.data.clone())
-            .unwrap()
-            .into_shared();
+    let array = ndarray::Array::from_shape_vec(ndarray::IxDyn(&tensor.shape), tensor.data.clone())
+        .unwrap()
+        .into_shared();
     burn_ndarray::NdArrayTensor::from(array)
 }
 

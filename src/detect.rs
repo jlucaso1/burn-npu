@@ -107,11 +107,7 @@ fn detect_intel_linux() -> Option<NpuInfo> {
             .map(|entries| {
                 entries
                     .filter_map(|e| e.ok())
-                    .any(|e| {
-                        e.file_name()
-                            .to_string_lossy()
-                            .starts_with("accel")
-                    })
+                    .any(|e| e.file_name().to_string_lossy().starts_with("accel"))
             })
             .unwrap_or(false);
 
@@ -135,7 +131,9 @@ fn detect_intel_windows() -> Option<NpuInfo> {
         r"C:\Program Files (x86)\Intel\openvino\runtime\bin\intel64\Release\openvino.dll",
         r"C:\Program Files\Intel\openvino\runtime\bin\intel64\Release\openvino.dll",
     ];
-    let has_openvino = openvino_paths.iter().any(|p| std::path::Path::new(p).exists());
+    let has_openvino = openvino_paths
+        .iter()
+        .any(|p| std::path::Path::new(p).exists());
     if !has_openvino {
         return None;
     }

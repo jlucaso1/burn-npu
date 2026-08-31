@@ -24,17 +24,25 @@ fn build_npu_sys() {
     // Compile Swift to static library
     let status = Command::new("swiftc")
         .args([
-            "-parse-as-library", "-emit-library", "-static", "-O",
-            "-module-name", "npu_sys",
+            "-parse-as-library",
+            "-emit-library",
+            "-static",
+            "-O",
+            "-module-name",
+            "npu_sys",
             &src.to_string_lossy(),
-            "-o", &lib.to_string_lossy(),
+            "-o",
+            &lib.to_string_lossy(),
         ])
         .status();
 
     match status {
         Ok(s) if s.success() => {
             // Link the static library
-            println!("cargo:rustc-link-search=native={}", npu_dir.canonicalize().unwrap().display());
+            println!(
+                "cargo:rustc-link-search=native={}",
+                npu_dir.canonicalize().unwrap().display()
+            );
             println!("cargo:rustc-link-lib=static=npu_sys");
 
             // Link Swift runtime (system) and CoreML

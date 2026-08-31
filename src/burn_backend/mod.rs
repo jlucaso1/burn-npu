@@ -173,9 +173,13 @@ impl Backend for NpuBurnBackend {
 
     fn name(_device: &Self::Device) -> String {
         #[cfg(feature = "intel")]
-        { String::from("Intel NPU") }
+        {
+            String::from("Intel NPU")
+        }
         #[cfg(feature = "qualcomm")]
-        { String::from("Qualcomm Hexagon") }
+        {
+            String::from("Qualcomm Hexagon")
+        }
     }
 
     fn seed(_device: &Self::Device, seed: u64) {

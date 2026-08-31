@@ -20,8 +20,12 @@ impl BoolTensorOps<Self> for NpuBurnBackend {
     async fn bool_into_data(tensor: BoolTensor<Self>) -> Result<TensorData, ExecutionError> {
         <Nd as BoolTensorOps<Nd>>::bool_into_data(tensor).await
     }
-    fn bool_device(_tensor: &BoolTensor<Self>) -> NpuBurnDevice { NpuBurnDevice::Default }
-    fn bool_to_device(tensor: BoolTensor<Self>, _device: &NpuBurnDevice) -> BoolTensor<Self> { tensor }
+    fn bool_device(_tensor: &BoolTensor<Self>) -> NpuBurnDevice {
+        NpuBurnDevice::Default
+    }
+    fn bool_to_device(tensor: BoolTensor<Self>, _device: &NpuBurnDevice) -> BoolTensor<Self> {
+        tensor
+    }
     fn bool_empty(shape: Shape, _device: &NpuBurnDevice) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_empty(shape, &nd_dev())
     }
@@ -47,7 +51,11 @@ impl BoolTensorOps<Self> for NpuBurnBackend {
     fn bool_slice(tensor: BoolTensor<Self>, slices: &[Slice]) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_slice(tensor, slices)
     }
-    fn bool_slice_assign(tensor: BoolTensor<Self>, slices: &[Slice], value: BoolTensor<Self>) -> BoolTensor<Self> {
+    fn bool_slice_assign(
+        tensor: BoolTensor<Self>,
+        slices: &[Slice],
+        value: BoolTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_slice_assign(tensor, slices, value)
     }
     fn bool_equal(lhs: BoolTensor<Self>, rhs: BoolTensor<Self>) -> BoolTensor<Self> {
@@ -77,25 +85,56 @@ impl BoolTensorOps<Self> for NpuBurnBackend {
     fn bool_cat(tensors: Vec<BoolTensor<Self>>, dim: usize) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_cat(tensors, dim)
     }
-    fn bool_select(tensor: BoolTensor<Self>, dim: usize, indices: IntTensor<Self>) -> BoolTensor<Self> {
+    fn bool_select(
+        tensor: BoolTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_select(tensor, dim, indices)
     }
-    fn bool_select_or(tensor: BoolTensor<Self>, dim: usize, indices: IntTensor<Self>, value: BoolTensor<Self>) -> BoolTensor<Self> {
+    fn bool_select_or(
+        tensor: BoolTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+        value: BoolTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_select_or(tensor, dim, indices, value)
     }
-    fn bool_unfold(tensor: BoolTensor<Self>, dim: usize, size: usize, step: usize) -> BoolTensor<Self> {
+    fn bool_unfold(
+        tensor: BoolTensor<Self>,
+        dim: usize,
+        size: usize,
+        step: usize,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_unfold(tensor, dim, size, step)
     }
-    fn bool_mask_where(tensor: BoolTensor<Self>, mask: BoolTensor<Self>, value: BoolTensor<Self>) -> BoolTensor<Self> {
+    fn bool_mask_where(
+        tensor: BoolTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: BoolTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_mask_where(tensor, mask, value)
     }
-    fn bool_mask_fill(tensor: BoolTensor<Self>, mask: BoolTensor<Self>, value: bool) -> BoolTensor<Self> {
+    fn bool_mask_fill(
+        tensor: BoolTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: bool,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_mask_fill(tensor, mask, value)
     }
-    fn bool_gather(dim: usize, tensor: BoolTensor<Self>, indices: IntTensor<Self>) -> BoolTensor<Self> {
+    fn bool_gather(
+        dim: usize,
+        tensor: BoolTensor<Self>,
+        indices: IntTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_gather(dim, tensor, indices)
     }
-    fn bool_scatter_or(dim: usize, tensor: BoolTensor<Self>, indices: IntTensor<Self>, value: BoolTensor<Self>) -> BoolTensor<Self> {
+    fn bool_scatter_or(
+        dim: usize,
+        tensor: BoolTensor<Self>,
+        indices: IntTensor<Self>,
+        value: BoolTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_scatter_or(dim, tensor, indices, value)
     }
     fn bool_equal_elem(lhs: BoolTensor<Self>, rhs: bool) -> BoolTensor<Self> {
@@ -120,8 +159,12 @@ impl BoolTensorOps<Self> for NpuBurnBackend {
     async fn bool_into_data(tensor: BoolTensor<Self>) -> Result<TensorData, ExecutionError> {
         <Nd as BoolTensorOps<Nd>>::bool_into_data(tensor).await
     }
-    fn bool_device(_tensor: &BoolTensor<Self>) -> NpuBurnDevice { NpuBurnDevice::Default }
-    fn bool_to_device(tensor: BoolTensor<Self>, _device: &NpuBurnDevice) -> BoolTensor<Self> { tensor }
+    fn bool_device(_tensor: &BoolTensor<Self>) -> NpuBurnDevice {
+        NpuBurnDevice::Default
+    }
+    fn bool_to_device(tensor: BoolTensor<Self>, _device: &NpuBurnDevice) -> BoolTensor<Self> {
+        tensor
+    }
     fn bool_empty(shape: Shape, _device: &NpuBurnDevice) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_empty(shape, &nd_dev())
     }
@@ -143,7 +186,11 @@ impl BoolTensorOps<Self> for NpuBurnBackend {
     fn bool_slice(tensor: BoolTensor<Self>, slices: &[Slice]) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_slice(tensor, slices)
     }
-    fn bool_slice_assign(tensor: BoolTensor<Self>, slices: &[Slice], value: BoolTensor<Self>) -> BoolTensor<Self> {
+    fn bool_slice_assign(
+        tensor: BoolTensor<Self>,
+        slices: &[Slice],
+        value: BoolTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_slice_assign(tensor, slices, value)
     }
     fn bool_equal(lhs: BoolTensor<Self>, rhs: BoolTensor<Self>) -> BoolTensor<Self> {
@@ -173,25 +220,56 @@ impl BoolTensorOps<Self> for NpuBurnBackend {
     fn bool_cat(tensors: Vec<BoolTensor<Self>>, dim: usize) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_cat(tensors, dim)
     }
-    fn bool_select(tensor: BoolTensor<Self>, dim: usize, indices: IntTensor<Self>) -> BoolTensor<Self> {
+    fn bool_select(
+        tensor: BoolTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_select(tensor, dim, indices)
     }
-    fn bool_select_or(tensor: BoolTensor<Self>, dim: usize, indices: IntTensor<Self>, value: BoolTensor<Self>) -> BoolTensor<Self> {
+    fn bool_select_or(
+        tensor: BoolTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+        value: BoolTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_select_or(tensor, dim, indices, value)
     }
-    fn bool_unfold(tensor: BoolTensor<Self>, dim: usize, size: usize, step: usize) -> BoolTensor<Self> {
+    fn bool_unfold(
+        tensor: BoolTensor<Self>,
+        dim: usize,
+        size: usize,
+        step: usize,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_unfold(tensor, dim, size, step)
     }
-    fn bool_mask_where(tensor: BoolTensor<Self>, mask: BoolTensor<Self>, value: BoolTensor<Self>) -> BoolTensor<Self> {
+    fn bool_mask_where(
+        tensor: BoolTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: BoolTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_mask_where(tensor, mask, value)
     }
-    fn bool_mask_fill(tensor: BoolTensor<Self>, mask: BoolTensor<Self>, value: bool) -> BoolTensor<Self> {
+    fn bool_mask_fill(
+        tensor: BoolTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: bool,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_mask_fill(tensor, mask, value)
     }
-    fn bool_gather(dim: usize, tensor: BoolTensor<Self>, indices: IntTensor<Self>) -> BoolTensor<Self> {
+    fn bool_gather(
+        dim: usize,
+        tensor: BoolTensor<Self>,
+        indices: IntTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_gather(dim, tensor, indices)
     }
-    fn bool_scatter_or(dim: usize, tensor: BoolTensor<Self>, indices: IntTensor<Self>, value: BoolTensor<Self>) -> BoolTensor<Self> {
+    fn bool_scatter_or(
+        dim: usize,
+        tensor: BoolTensor<Self>,
+        indices: IntTensor<Self>,
+        value: BoolTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_scatter_or(dim, tensor, indices, value)
     }
     fn bool_equal_elem(lhs: BoolTensor<Self>, rhs: bool) -> BoolTensor<Self> {
@@ -216,8 +294,12 @@ impl BoolTensorOps<Self> for NpuBurnBackend {
     async fn bool_into_data(tensor: BoolTensor<Self>) -> Result<TensorData, ExecutionError> {
         <Nd as BoolTensorOps<Nd>>::bool_into_data(tensor).await
     }
-    fn bool_device(_tensor: &BoolTensor<Self>) -> NpuBurnDevice { NpuBurnDevice::Default }
-    fn bool_to_device(tensor: BoolTensor<Self>, _device: &NpuBurnDevice) -> BoolTensor<Self> { tensor }
+    fn bool_device(_tensor: &BoolTensor<Self>) -> NpuBurnDevice {
+        NpuBurnDevice::Default
+    }
+    fn bool_to_device(tensor: BoolTensor<Self>, _device: &NpuBurnDevice) -> BoolTensor<Self> {
+        tensor
+    }
     fn bool_empty(shape: Shape, _device: &NpuBurnDevice) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_empty(shape, &nd_dev())
     }
@@ -243,7 +325,11 @@ impl BoolTensorOps<Self> for NpuBurnBackend {
     fn bool_slice(tensor: BoolTensor<Self>, slices: &[Slice]) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_slice(tensor, slices)
     }
-    fn bool_slice_assign(tensor: BoolTensor<Self>, slices: &[Slice], value: BoolTensor<Self>) -> BoolTensor<Self> {
+    fn bool_slice_assign(
+        tensor: BoolTensor<Self>,
+        slices: &[Slice],
+        value: BoolTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_slice_assign(tensor, slices, value)
     }
     fn bool_equal(lhs: BoolTensor<Self>, rhs: BoolTensor<Self>) -> BoolTensor<Self> {
@@ -273,25 +359,56 @@ impl BoolTensorOps<Self> for NpuBurnBackend {
     fn bool_cat(tensors: Vec<BoolTensor<Self>>, dim: usize) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_cat(tensors, dim)
     }
-    fn bool_select(tensor: BoolTensor<Self>, dim: usize, indices: IntTensor<Self>) -> BoolTensor<Self> {
+    fn bool_select(
+        tensor: BoolTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_select(tensor, dim, indices)
     }
-    fn bool_select_or(tensor: BoolTensor<Self>, dim: usize, indices: IntTensor<Self>, value: BoolTensor<Self>) -> BoolTensor<Self> {
+    fn bool_select_or(
+        tensor: BoolTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+        value: BoolTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_select_or(tensor, dim, indices, value)
     }
-    fn bool_unfold(tensor: BoolTensor<Self>, dim: usize, size: usize, step: usize) -> BoolTensor<Self> {
+    fn bool_unfold(
+        tensor: BoolTensor<Self>,
+        dim: usize,
+        size: usize,
+        step: usize,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_unfold(tensor, dim, size, step)
     }
-    fn bool_mask_where(tensor: BoolTensor<Self>, mask: BoolTensor<Self>, value: BoolTensor<Self>) -> BoolTensor<Self> {
+    fn bool_mask_where(
+        tensor: BoolTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: BoolTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_mask_where(tensor, mask, value)
     }
-    fn bool_mask_fill(tensor: BoolTensor<Self>, mask: BoolTensor<Self>, value: bool) -> BoolTensor<Self> {
+    fn bool_mask_fill(
+        tensor: BoolTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: bool,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_mask_fill(tensor, mask, value)
     }
-    fn bool_gather(dim: usize, tensor: BoolTensor<Self>, indices: IntTensor<Self>) -> BoolTensor<Self> {
+    fn bool_gather(
+        dim: usize,
+        tensor: BoolTensor<Self>,
+        indices: IntTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_gather(dim, tensor, indices)
     }
-    fn bool_scatter_or(dim: usize, tensor: BoolTensor<Self>, indices: IntTensor<Self>, value: BoolTensor<Self>) -> BoolTensor<Self> {
+    fn bool_scatter_or(
+        dim: usize,
+        tensor: BoolTensor<Self>,
+        indices: IntTensor<Self>,
+        value: BoolTensor<Self>,
+    ) -> BoolTensor<Self> {
         <Nd as BoolTensorOps<Nd>>::bool_scatter_or(dim, tensor, indices, value)
     }
     fn bool_equal_elem(lhs: BoolTensor<Self>, rhs: bool) -> BoolTensor<Self> {

@@ -99,7 +99,11 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
         }
     }
 
-    fn float_cross(lhs: FloatTensor<Self>, rhs: FloatTensor<Self>, dim: usize) -> FloatTensor<Self> {
+    fn float_cross(
+        lhs: FloatTensor<Self>,
+        rhs: FloatTensor<Self>,
+        dim: usize,
+    ) -> FloatTensor<Self> {
         // No FFI for cross product — round-trip through NdArray
         let nd_lhs = npu_to_ndarray(&lhs);
         let nd_rhs = npu_to_ndarray(&rhs);
@@ -237,9 +241,15 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
     ) -> FloatTensor<Self> {
         let idx_data = extract_i64(&indices);
         let idx_i32: Vec<i32> = idx_data.iter().map(|&v| v as i32).collect();
-        let idx_len = idx_data.len(); let idx_shape: Vec<i32> = vec![idx_len as i32];
+        let idx_len = idx_data.len();
+        let idx_shape: Vec<i32> = vec![idx_len as i32];
         unsafe {
-            let idx_handle = npu_create_int_tensor(idx_shape.as_ptr(), idx_shape.len() as i32, idx_i32.as_ptr(), idx_i32.len() as i32);
+            let idx_handle = npu_create_int_tensor(
+                idx_shape.as_ptr(),
+                idx_shape.len() as i32,
+                idx_i32.as_ptr(),
+                idx_i32.len() as i32,
+            );
             let result = npu_gather(tensor.handle, dim as i32, idx_handle);
             npu_free_tensor(idx_handle);
             NpuFloatTensor { handle: result }
@@ -254,7 +264,8 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
     ) -> FloatTensor<Self> {
         let nd_tensor = npu_to_ndarray(&tensor);
         let nd_value = npu_to_ndarray(&value);
-        let result = <Nd as FloatTensorOps<Nd>>::float_scatter_add(dim, nd_tensor, indices, nd_value);
+        let result =
+            <Nd as FloatTensorOps<Nd>>::float_scatter_add(dim, nd_tensor, indices, nd_value);
         ndarray_to_npu(&result)
     }
 
@@ -266,9 +277,15 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
         // Native NPU gather — no readback of weight tensor
         let idx_data = extract_i64(&indices);
         let idx_i32: Vec<i32> = idx_data.iter().map(|&v| v as i32).collect();
-        let idx_len = idx_data.len(); let idx_shape: Vec<i32> = vec![idx_len as i32];
+        let idx_len = idx_data.len();
+        let idx_shape: Vec<i32> = vec![idx_len as i32];
         unsafe {
-            let idx_handle = npu_create_int_tensor(idx_shape.as_ptr(), idx_shape.len() as i32, idx_i32.as_ptr(), idx_i32.len() as i32);
+            let idx_handle = npu_create_int_tensor(
+                idx_shape.as_ptr(),
+                idx_shape.len() as i32,
+                idx_i32.as_ptr(),
+                idx_i32.len() as i32,
+            );
             let result = npu_gather(tensor.handle, dim as i32, idx_handle);
             npu_free_tensor(idx_handle);
             NpuFloatTensor { handle: result }
@@ -791,7 +808,11 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
         <Nd as FloatTensorOps<Nd>>::float_from_data(data, &nd_dev())
     }
 
-    fn float_random(shape: Shape, distribution: Distribution, _device: &NpuBurnDevice) -> FloatTensor<Self> {
+    fn float_random(
+        shape: Shape,
+        distribution: Distribution,
+        _device: &NpuBurnDevice,
+    ) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_random(shape, distribution, &nd_dev())
     }
 
@@ -803,12 +824,21 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
         <Nd as FloatTensorOps<Nd>>::float_ones(shape, &nd_dev(), dtype)
     }
 
-    fn float_full(shape: Shape, fill_value: f32, _device: &NpuBurnDevice, dtype: FloatDType) -> FloatTensor<Self> {
+    fn float_full(
+        shape: Shape,
+        fill_value: f32,
+        _device: &NpuBurnDevice,
+        dtype: FloatDType,
+    ) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_full(shape, fill_value, &nd_dev(), dtype)
     }
 
-    fn float_device(_tensor: &FloatTensor<Self>) -> NpuBurnDevice { NpuBurnDevice::Default }
-    fn float_to_device(tensor: FloatTensor<Self>, _device: &NpuBurnDevice) -> FloatTensor<Self> { tensor }
+    fn float_device(_tensor: &FloatTensor<Self>) -> NpuBurnDevice {
+        NpuBurnDevice::Default
+    }
+    fn float_to_device(tensor: FloatTensor<Self>, _device: &NpuBurnDevice) -> FloatTensor<Self> {
+        tensor
+    }
 
     fn float_empty(shape: Shape, _device: &NpuBurnDevice, dtype: FloatDType) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_empty(shape, &nd_dev(), dtype)
@@ -821,7 +851,11 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
     fn float_matmul(lhs: FloatTensor<Self>, rhs: FloatTensor<Self>) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_matmul(lhs, rhs)
     }
-    fn float_cross(lhs: FloatTensor<Self>, rhs: FloatTensor<Self>, dim: usize) -> FloatTensor<Self> {
+    fn float_cross(
+        lhs: FloatTensor<Self>,
+        rhs: FloatTensor<Self>,
+        dim: usize,
+    ) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_cross(lhs, rhs, dim)
     }
     fn float_into_int(tensor: FloatTensor<Self>) -> IntTensor<Self> {
@@ -875,28 +909,58 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
     fn float_expand(tensor: FloatTensor<Self>, shape: Shape) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_expand(tensor, shape)
     }
-    fn float_gather(dim: usize, tensor: FloatTensor<Self>, indices: IntTensor<Self>) -> FloatTensor<Self> {
+    fn float_gather(
+        dim: usize,
+        tensor: FloatTensor<Self>,
+        indices: IntTensor<Self>,
+    ) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_gather(dim, tensor, indices)
     }
-    fn float_scatter_add(dim: usize, tensor: FloatTensor<Self>, indices: IntTensor<Self>, value: FloatTensor<Self>) -> FloatTensor<Self> {
+    fn float_scatter_add(
+        dim: usize,
+        tensor: FloatTensor<Self>,
+        indices: IntTensor<Self>,
+        value: FloatTensor<Self>,
+    ) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_scatter_add(dim, tensor, indices, value)
     }
-    fn float_select(tensor: FloatTensor<Self>, dim: usize, indices: IntTensor<Self>) -> FloatTensor<Self> {
+    fn float_select(
+        tensor: FloatTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+    ) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_select(tensor, dim, indices)
     }
-    fn float_select_add(tensor: FloatTensor<Self>, dim: usize, indices: IntTensor<Self>, value: FloatTensor<Self>) -> FloatTensor<Self> {
+    fn float_select_add(
+        tensor: FloatTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+        value: FloatTensor<Self>,
+    ) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_select_add(tensor, dim, indices, value)
     }
     fn float_slice(tensor: FloatTensor<Self>, slices: &[Slice]) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_slice(tensor, slices)
     }
-    fn float_slice_assign(tensor: FloatTensor<Self>, slices: &[Slice], value: FloatTensor<Self>) -> FloatTensor<Self> {
+    fn float_slice_assign(
+        tensor: FloatTensor<Self>,
+        slices: &[Slice],
+        value: FloatTensor<Self>,
+    ) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_slice_assign(tensor, slices, value)
     }
-    fn float_mask_where(tensor: FloatTensor<Self>, mask: BoolTensor<Self>, value: FloatTensor<Self>) -> FloatTensor<Self> {
+    fn float_mask_where(
+        tensor: FloatTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: FloatTensor<Self>,
+    ) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_mask_where(tensor, mask, value)
     }
-    fn float_mask_fill(tensor: FloatTensor<Self>, mask: BoolTensor<Self>, value: f32) -> FloatTensor<Self> {
+    fn float_mask_fill(
+        tensor: FloatTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: f32,
+    ) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_mask_fill(tensor, mask, value)
     }
     fn float_equal(lhs: FloatTensor<Self>, rhs: FloatTensor<Self>) -> BoolTensor<Self> {
@@ -1061,10 +1125,19 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
     fn float_cast(tensor: FloatTensor<Self>, dtype: FloatDType) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_cast(tensor, dtype)
     }
-    fn float_grid_sample_2d(tensor: FloatTensor<Self>, grid: FloatTensor<Self>, options: GridSampleOptions) -> FloatTensor<Self> {
+    fn float_grid_sample_2d(
+        tensor: FloatTensor<Self>,
+        grid: FloatTensor<Self>,
+        options: GridSampleOptions,
+    ) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_grid_sample_2d(tensor, grid, options)
     }
-    fn float_unfold(tensor: FloatTensor<Self>, dim: usize, size: usize, step: usize) -> FloatTensor<Self> {
+    fn float_unfold(
+        tensor: FloatTensor<Self>,
+        dim: usize,
+        size: usize,
+        step: usize,
+    ) -> FloatTensor<Self> {
         <Nd as FloatTensorOps<Nd>>::float_unfold(tensor, dim, size, step)
     }
     fn float_max(tensor: FloatTensor<Self>) -> FloatTensor<Self> {
@@ -1154,7 +1227,11 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
         }
     }
 
-    fn float_cross(lhs: FloatTensor<Self>, rhs: FloatTensor<Self>, dim: usize) -> FloatTensor<Self> {
+    fn float_cross(
+        lhs: FloatTensor<Self>,
+        rhs: FloatTensor<Self>,
+        dim: usize,
+    ) -> FloatTensor<Self> {
         let nd_lhs = npu_to_ndarray(&lhs);
         let nd_rhs = npu_to_ndarray(&rhs);
         let result = <Nd as FloatTensorOps<Nd>>::float_cross(nd_lhs, nd_rhs, dim);
@@ -1271,29 +1348,49 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
         ndarray_to_npu(&result)
     }
 
-    fn float_gather(dim: usize, tensor: FloatTensor<Self>, indices: IntTensor<Self>) -> FloatTensor<Self> {
+    fn float_gather(
+        dim: usize,
+        tensor: FloatTensor<Self>,
+        indices: IntTensor<Self>,
+    ) -> FloatTensor<Self> {
         let nd = npu_to_ndarray(&tensor);
         let result = <Nd as FloatTensorOps<Nd>>::float_gather(dim, nd, indices);
         ndarray_to_npu(&result)
     }
 
-    fn float_scatter_add(dim: usize, tensor: FloatTensor<Self>, indices: IntTensor<Self>, value: FloatTensor<Self>) -> FloatTensor<Self> {
+    fn float_scatter_add(
+        dim: usize,
+        tensor: FloatTensor<Self>,
+        indices: IntTensor<Self>,
+        value: FloatTensor<Self>,
+    ) -> FloatTensor<Self> {
         let nd_tensor = npu_to_ndarray(&tensor);
         let nd_value = npu_to_ndarray(&value);
-        let result = <Nd as FloatTensorOps<Nd>>::float_scatter_add(dim, nd_tensor, indices, nd_value);
+        let result =
+            <Nd as FloatTensorOps<Nd>>::float_scatter_add(dim, nd_tensor, indices, nd_value);
         ndarray_to_npu(&result)
     }
 
-    fn float_select(tensor: FloatTensor<Self>, dim: usize, indices: IntTensor<Self>) -> FloatTensor<Self> {
+    fn float_select(
+        tensor: FloatTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+    ) -> FloatTensor<Self> {
         let nd = npu_to_ndarray(&tensor);
         let result = <Nd as FloatTensorOps<Nd>>::float_select(nd, dim, indices);
         ndarray_to_npu(&result)
     }
 
-    fn float_select_add(tensor: FloatTensor<Self>, dim: usize, indices: IntTensor<Self>, value: FloatTensor<Self>) -> FloatTensor<Self> {
+    fn float_select_add(
+        tensor: FloatTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+        value: FloatTensor<Self>,
+    ) -> FloatTensor<Self> {
         let nd_tensor = npu_to_ndarray(&tensor);
         let nd_value = npu_to_ndarray(&value);
-        let result = <Nd as FloatTensorOps<Nd>>::float_select_add(nd_tensor, dim, indices, nd_value);
+        let result =
+            <Nd as FloatTensorOps<Nd>>::float_select_add(nd_tensor, dim, indices, nd_value);
         ndarray_to_npu(&result)
     }
 
@@ -1303,21 +1400,33 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
         ndarray_to_npu(&result)
     }
 
-    fn float_slice_assign(tensor: FloatTensor<Self>, slices: &[Slice], value: FloatTensor<Self>) -> FloatTensor<Self> {
+    fn float_slice_assign(
+        tensor: FloatTensor<Self>,
+        slices: &[Slice],
+        value: FloatTensor<Self>,
+    ) -> FloatTensor<Self> {
         let nd_tensor = npu_to_ndarray(&tensor);
         let nd_value = npu_to_ndarray(&value);
         let result = <Nd as FloatTensorOps<Nd>>::float_slice_assign(nd_tensor, slices, nd_value);
         ndarray_to_npu(&result)
     }
 
-    fn float_mask_where(tensor: FloatTensor<Self>, mask: BoolTensor<Self>, value: FloatTensor<Self>) -> FloatTensor<Self> {
+    fn float_mask_where(
+        tensor: FloatTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: FloatTensor<Self>,
+    ) -> FloatTensor<Self> {
         let nd_tensor = npu_to_ndarray(&tensor);
         let nd_value = npu_to_ndarray(&value);
         let result = <Nd as FloatTensorOps<Nd>>::float_mask_where(nd_tensor, mask, nd_value);
         ndarray_to_npu(&result)
     }
 
-    fn float_mask_fill(tensor: FloatTensor<Self>, mask: BoolTensor<Self>, value: f32) -> FloatTensor<Self> {
+    fn float_mask_fill(
+        tensor: FloatTensor<Self>,
+        mask: BoolTensor<Self>,
+        value: f32,
+    ) -> FloatTensor<Self> {
         let nd_tensor = npu_to_ndarray(&tensor);
         let result = <Nd as FloatTensorOps<Nd>>::float_mask_fill(nd_tensor, mask, value);
         ndarray_to_npu(&result)

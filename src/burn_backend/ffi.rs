@@ -6,8 +6,18 @@
 #[cfg(feature = "apple")]
 #[allow(dead_code)]
 extern "C" {
-    pub(super) fn npu_create_tensor(shape: *const i32, dims: i32, data: *const f32, len: i32) -> i32;
-    pub(super) fn npu_create_int_tensor(shape: *const i32, dims: i32, data: *const i32, len: i32) -> i32;
+    pub(super) fn npu_create_tensor(
+        shape: *const i32,
+        dims: i32,
+        data: *const f32,
+        len: i32,
+    ) -> i32;
+    pub(super) fn npu_create_int_tensor(
+        shape: *const i32,
+        dims: i32,
+        data: *const i32,
+        len: i32,
+    ) -> i32;
     pub(super) fn npu_free_tensor(id: i32);
     pub(super) fn npu_get_shape(id: i32, out: *mut i32, max: i32) -> i32;
     pub(super) fn npu_get_data(id: i32, out: *mut f32, max: i32) -> i32;

@@ -131,7 +131,12 @@ pub(super) fn extract_i64(tensor: &NdArrayTensor) -> Vec<i64> {
     if let NdArrayTensor::I32(ref storage) = tensor {
         let view = storage.view();
         let contig = view.as_standard_layout();
-        return contig.as_slice().unwrap().iter().map(|&v| v as i64).collect();
+        return contig
+            .as_slice()
+            .unwrap()
+            .iter()
+            .map(|&v| v as i64)
+            .collect();
     }
     panic!("extract_i64: expected I64 or I32 NdArrayTensor");
 }

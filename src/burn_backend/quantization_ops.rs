@@ -3,7 +3,7 @@
 use burn_tensor::backend::ExecutionError;
 use burn_tensor::ops::*;
 use burn_tensor::ops::{FloatTensor, IntTensor, QuantizedTensor};
-use burn_tensor::quantization::{QuantizationParametersPrimitive, QuantScheme};
+use burn_tensor::quantization::{QuantScheme, QuantizationParametersPrimitive};
 use burn_tensor::{Shape, Slice, TensorData};
 
 #[cfg(any(feature = "apple", feature = "intel", feature = "qualcomm"))]
@@ -27,9 +27,7 @@ impl QTensorOps<Self> for NpuBurnBackend {
         // Convert NpuFloatTensor -> NdArrayTensor for NdArray's quantize
         let nd_tensor = npu_to_ndarray(&tensor);
         let nd_scales = npu_to_ndarray(&qparams.scales);
-        let nd_qparams = QuantizationParametersPrimitive::<Nd> {
-            scales: nd_scales,
-        };
+        let nd_qparams = QuantizationParametersPrimitive::<Nd> { scales: nd_scales };
         <Nd as QTensorOps<Nd>>::quantize(nd_tensor, scheme, nd_qparams)
     }
 
@@ -42,7 +40,10 @@ impl QTensorOps<Self> for NpuBurnBackend {
         NpuBurnDevice::Default
     }
 
-    fn q_to_device(tensor: QuantizedTensor<Self>, _device: &NpuBurnDevice) -> QuantizedTensor<Self> {
+    fn q_to_device(
+        tensor: QuantizedTensor<Self>,
+        _device: &NpuBurnDevice,
+    ) -> QuantizedTensor<Self> {
         tensor
     }
 
@@ -54,7 +55,11 @@ impl QTensorOps<Self> for NpuBurnBackend {
         <Nd as QTensorOps<Nd>>::q_into_data(tensor).await
     }
 
-    fn q_swap_dims(tensor: QuantizedTensor<Self>, dim1: usize, dim2: usize) -> QuantizedTensor<Self> {
+    fn q_swap_dims(
+        tensor: QuantizedTensor<Self>,
+        dim1: usize,
+        dim2: usize,
+    ) -> QuantizedTensor<Self> {
         <Nd as QTensorOps<Nd>>::q_swap_dims(tensor, dim1, dim2)
     }
 
@@ -66,11 +71,19 @@ impl QTensorOps<Self> for NpuBurnBackend {
         <Nd as QTensorOps<Nd>>::q_flip(tensor, axes)
     }
 
-    fn q_gather(dim: usize, tensor: QuantizedTensor<Self>, indices: IntTensor<Self>) -> QuantizedTensor<Self> {
+    fn q_gather(
+        dim: usize,
+        tensor: QuantizedTensor<Self>,
+        indices: IntTensor<Self>,
+    ) -> QuantizedTensor<Self> {
         <Nd as QTensorOps<Nd>>::q_gather(dim, tensor, indices)
     }
 
-    fn q_select(tensor: QuantizedTensor<Self>, dim: usize, indices: IntTensor<Self>) -> QuantizedTensor<Self> {
+    fn q_select(
+        tensor: QuantizedTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+    ) -> QuantizedTensor<Self> {
         <Nd as QTensorOps<Nd>>::q_select(tensor, dim, indices)
     }
 
@@ -105,7 +118,9 @@ impl QTensorOps<Self> for NpuBurnBackend {
         scheme: &QuantScheme,
         qparams: QuantizationParametersPrimitive<Self>,
     ) -> QuantizedTensor<Self> {
-        let nd_qparams = QuantizationParametersPrimitive::<Nd> { scales: qparams.scales };
+        let nd_qparams = QuantizationParametersPrimitive::<Nd> {
+            scales: qparams.scales,
+        };
         <Nd as QTensorOps<Nd>>::quantize(tensor, scheme, nd_qparams)
     }
 
@@ -117,7 +132,10 @@ impl QTensorOps<Self> for NpuBurnBackend {
         NpuBurnDevice::Default
     }
 
-    fn q_to_device(tensor: QuantizedTensor<Self>, _device: &NpuBurnDevice) -> QuantizedTensor<Self> {
+    fn q_to_device(
+        tensor: QuantizedTensor<Self>,
+        _device: &NpuBurnDevice,
+    ) -> QuantizedTensor<Self> {
         tensor
     }
 
@@ -129,7 +147,11 @@ impl QTensorOps<Self> for NpuBurnBackend {
         <Nd as QTensorOps<Nd>>::q_into_data(tensor).await
     }
 
-    fn q_swap_dims(tensor: QuantizedTensor<Self>, dim1: usize, dim2: usize) -> QuantizedTensor<Self> {
+    fn q_swap_dims(
+        tensor: QuantizedTensor<Self>,
+        dim1: usize,
+        dim2: usize,
+    ) -> QuantizedTensor<Self> {
         <Nd as QTensorOps<Nd>>::q_swap_dims(tensor, dim1, dim2)
     }
 
@@ -141,11 +163,19 @@ impl QTensorOps<Self> for NpuBurnBackend {
         <Nd as QTensorOps<Nd>>::q_flip(tensor, axes)
     }
 
-    fn q_gather(dim: usize, tensor: QuantizedTensor<Self>, indices: IntTensor<Self>) -> QuantizedTensor<Self> {
+    fn q_gather(
+        dim: usize,
+        tensor: QuantizedTensor<Self>,
+        indices: IntTensor<Self>,
+    ) -> QuantizedTensor<Self> {
         <Nd as QTensorOps<Nd>>::q_gather(dim, tensor, indices)
     }
 
-    fn q_select(tensor: QuantizedTensor<Self>, dim: usize, indices: IntTensor<Self>) -> QuantizedTensor<Self> {
+    fn q_select(
+        tensor: QuantizedTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+    ) -> QuantizedTensor<Self> {
         <Nd as QTensorOps<Nd>>::q_select(tensor, dim, indices)
     }
 
@@ -182,9 +212,7 @@ impl QTensorOps<Self> for NpuBurnBackend {
     ) -> QuantizedTensor<Self> {
         let nd_tensor = npu_to_ndarray(&tensor);
         let nd_scales = npu_to_ndarray(&qparams.scales);
-        let nd_qparams = QuantizationParametersPrimitive::<Nd> {
-            scales: nd_scales,
-        };
+        let nd_qparams = QuantizationParametersPrimitive::<Nd> { scales: nd_scales };
         <Nd as QTensorOps<Nd>>::quantize(nd_tensor, scheme, nd_qparams)
     }
 
@@ -197,7 +225,10 @@ impl QTensorOps<Self> for NpuBurnBackend {
         NpuBurnDevice::Default
     }
 
-    fn q_to_device(tensor: QuantizedTensor<Self>, _device: &NpuBurnDevice) -> QuantizedTensor<Self> {
+    fn q_to_device(
+        tensor: QuantizedTensor<Self>,
+        _device: &NpuBurnDevice,
+    ) -> QuantizedTensor<Self> {
         tensor
     }
 
@@ -209,7 +240,11 @@ impl QTensorOps<Self> for NpuBurnBackend {
         <Nd as QTensorOps<Nd>>::q_into_data(tensor).await
     }
 
-    fn q_swap_dims(tensor: QuantizedTensor<Self>, dim1: usize, dim2: usize) -> QuantizedTensor<Self> {
+    fn q_swap_dims(
+        tensor: QuantizedTensor<Self>,
+        dim1: usize,
+        dim2: usize,
+    ) -> QuantizedTensor<Self> {
         <Nd as QTensorOps<Nd>>::q_swap_dims(tensor, dim1, dim2)
     }
 
@@ -221,11 +256,19 @@ impl QTensorOps<Self> for NpuBurnBackend {
         <Nd as QTensorOps<Nd>>::q_flip(tensor, axes)
     }
 
-    fn q_gather(dim: usize, tensor: QuantizedTensor<Self>, indices: IntTensor<Self>) -> QuantizedTensor<Self> {
+    fn q_gather(
+        dim: usize,
+        tensor: QuantizedTensor<Self>,
+        indices: IntTensor<Self>,
+    ) -> QuantizedTensor<Self> {
         <Nd as QTensorOps<Nd>>::q_gather(dim, tensor, indices)
     }
 
-    fn q_select(tensor: QuantizedTensor<Self>, dim: usize, indices: IntTensor<Self>) -> QuantizedTensor<Self> {
+    fn q_select(
+        tensor: QuantizedTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+    ) -> QuantizedTensor<Self> {
         <Nd as QTensorOps<Nd>>::q_select(tensor, dim, indices)
     }
 

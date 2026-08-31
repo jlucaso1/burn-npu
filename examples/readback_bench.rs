@@ -51,4 +51,21 @@ fn main() {
         elapsed,
         elapsed / n
     );
+
+    // fp16 vs fp32 matmul at GPT-2-ish dimensions. fp16 is the ANE's native
+    // format, so this is the precision the hardware actually wants.
+    use burn::tensor::DType;
+    let iters = 50u32;
+    for dtype in [DType::F32, DType::F16] {
+        let lhs = Tensor::<B, 2>::zeros([512, 768], &device).cast(dtype) + 0.5;
+        let rhs = Tensor::<B, 2>::zeros([768, 768], &device).cast(dtype) + 0.5;
+        // Warm up: the first call pays graph setup.
+        let _ = lhs.clone().matmul(rhs.clone()).into_data();
+        let start = Instant::now();
+        for _ in 0..iters {
+            let _ = lhs.clone().matmul(rhs.clone()).into_data();
+        }
+        let elapsed = start.elapsed();
+        println!("matmul 512x768x768 {:?}: {:?} each", dtype, elapsed / iters);
+    }
 }

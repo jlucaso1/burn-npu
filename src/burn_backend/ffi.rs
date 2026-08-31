@@ -100,6 +100,17 @@ extern "C" {
 
     // Masking
     pub(super) fn npu_mask_fill(a: i32, mask: i32, value: f32) -> i32;
+    /// f16 payloads cross as raw bit patterns, matching `half::f16`'s layout.
+    pub(super) fn npu_create_tensor_f16(
+        shape: *const i32,
+        dims: i32,
+        data: *const u16,
+        len: i32,
+    ) -> i32;
+    pub(super) fn npu_get_data_f16(id: i32, out: *mut u16, max_len: i32) -> i32;
+    /// 0 = f32, 1 = f16, 2 = i32, -1 = unknown.
+    pub(super) fn npu_get_dtype(id: i32) -> i32;
+    pub(super) fn npu_cast_float(id: i32, code: i32) -> i32;
     pub(super) fn npu_mask_where(a: i32, mask: i32, source: i32) -> i32;
 
     // Creation

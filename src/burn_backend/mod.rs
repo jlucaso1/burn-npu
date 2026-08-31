@@ -3,15 +3,17 @@
 //! Platform-specific float tensor primitives:
 //!
 //! - **`apple`**: `NpuFloatTensor` wraps an `i32` MLTensor handle. All float ops
-//!   pass handles through FFI; no data leaves the NPU between ops.
+//!   pass handles through FFI; no data leaves the NPU between ops. Both f32 and
+//!   f16 are supported, f16 being the ANE's native format.
 //! - **`intel`**: `NpuFloatTensor` is `IntelFloatTensor` (`Vec<f32>` + shape).
 //!   Matmul attempts OpenVINO NPU dispatch; all other ops run on CPU or delegate
-//!   to burn-ndarray.
+//!   to burn-flex.
 //! - **`qualcomm`**: `NpuFloatTensor` is `QnnFloatTensor` (`Vec<f32>` + shape).
-//!   All ops currently run on CPU. Ready for QNN SDK integration.
+//!   Matmul dispatches to the Hexagon NPU when a QNN SDK was present at build
+//!   time; everything else runs on CPU.
 //! - **no feature**: `NpuFloatTensor` is `FlexTensor` (pure CPU fallback).
 //!
-//! Int/Bool tensor primitives always remain `FlexTensor` (delegated to burn-ndarray).
+//! Int/Bool tensor primitives always remain `FlexTensor` (delegated to burn-flex).
 
 extern crate alloc;
 
@@ -26,6 +28,9 @@ pub mod tensor;
 use alloc::string::String;
 use burn_flex::{Flex, FlexDevice, FlexQTensor, FlexTensor};
 use burn_tensor::backend::{Backend, BackendTypes, DTypeUsageSet, DeviceId, DeviceOps};
+// Only the apple path narrows dtype_usage; elsewhere it delegates wholesale.
+#[cfg(feature = "apple")]
+use burn_tensor::backend::DTypeUsage;
 use burn_tensor::ops::*;
 use burn_tensor::DType;
 
@@ -148,7 +153,27 @@ impl Backend for NpuBurnBackend {
         <Fx as Backend>::seed(&flex_dev(), seed);
     }
 
+    /// Report what this backend can actually do, not what the CPU delegate can.
+    ///
+    /// On the apple path float tensors live in MLTensor, which supports f32 and
+    /// f16 but not bf16 or f64. Previously this delegated wholesale to
+    /// burn-flex, so burn was told bf16 and f64 were available and every such
+    /// tensor was silently handled as f32 instead.
+    ///
+    /// Int, bool and quantized dtypes still delegate, because those primitives
+    /// really are burn-flex tensors.
     fn dtype_usage(_device: &Self::Device, dtype: DType) -> DTypeUsageSet {
+        #[cfg(feature = "apple")]
+        {
+            match dtype {
+                // fp16 is the ANE's native format; fp32 is accepted too.
+                DType::F32 | DType::F16 => {
+                    return DTypeUsage::Storage | DTypeUsage::Arithmetic;
+                }
+                DType::BF16 | DType::F64 => return DTypeUsageSet::empty(),
+                _ => {}
+            }
+        }
         <Fx as Backend>::dtype_usage(&flex_dev(), dtype)
     }
 

@@ -337,3 +337,85 @@ fn mask_fill_on_batched_tensor() {
     let out: Vec<f32> = a.mask_fill(mask, -1.0).into_data().to_vec().unwrap();
     assert_eq!(out, vec![1.0, 2.0, 3.0, 4.0, -1.0, -1.0, -1.0, -1.0]);
 }
+
+// ── Precision ──
+//
+// fp16 is the ANE's native format. These pin that an f16 tensor stays f16
+// through the backend rather than being silently widened to f32.
+
+#[test]
+fn f16_tensor_reports_f16_dtype() {
+    use burn::tensor::TensorData;
+    use burn_tensor::f16;
+
+    let data = TensorData::new(
+        vec![f16::from_f32(1.0), f16::from_f32(2.0)],
+        vec![1usize, 2],
+    );
+    let t = Tensor::<B, 2>::from_data(data, (&dev(), burn::tensor::DType::F16));
+    assert_eq!(t.dtype(), burn::tensor::DType::F16);
+}
+
+#[test]
+fn f16_roundtrips_through_the_backend() {
+    use burn::tensor::TensorData;
+    use burn_tensor::f16;
+
+    let values: Vec<f16> = [1.0f32, -2.5, 0.25, 100.0]
+        .iter()
+        .map(|&v| f16::from_f32(v))
+        .collect();
+    let t = Tensor::<B, 2>::from_data(
+        TensorData::new(values, vec![2usize, 2]),
+        (&dev(), burn::tensor::DType::F16),
+    );
+    assert_eq!(t.dtype(), burn::tensor::DType::F16);
+    let out: Vec<f16> = t.into_data().to_vec().unwrap();
+    let out: Vec<f32> = out.iter().map(|v| v.to_f32()).collect();
+    assert_eq!(out, vec![1.0, -2.5, 0.25, 100.0]);
+}
+
+#[test]
+fn f16_matmul_is_correct() {
+    use burn::tensor::{DType, TensorData};
+    use burn_tensor::f16;
+
+    let a = TensorData::new(
+        vec![
+            f16::from_f32(1.0),
+            f16::from_f32(2.0),
+            f16::from_f32(3.0),
+            f16::from_f32(4.0),
+        ],
+        vec![2usize, 2],
+    );
+    let b = TensorData::new(
+        vec![
+            f16::from_f32(5.0),
+            f16::from_f32(6.0),
+            f16::from_f32(7.0),
+            f16::from_f32(8.0),
+        ],
+        vec![2usize, 2],
+    );
+    let x = Tensor::<B, 2>::from_data(a, (&dev(), DType::F16));
+    let y = Tensor::<B, 2>::from_data(b, (&dev(), DType::F16));
+    let out = x.matmul(y);
+    // The result stays in f16 rather than being widened back to f32.
+    assert_eq!(out.dtype(), DType::F16);
+    let got: Vec<f16> = out.into_data().to_vec().unwrap();
+    let got: Vec<f32> = got.iter().map(|v| v.to_f32()).collect();
+    assert_eq!(got, vec![19.0, 22.0, 43.0, 50.0]);
+}
+
+#[test]
+fn cast_to_f16_actually_casts() {
+    use burn::tensor::DType;
+
+    let a = Tensor::<B, 2>::from_floats([[1.0, 2.0], [3.0, 4.0]], &dev());
+    assert_eq!(a.dtype(), DType::F32);
+    let half = a.cast(DType::F16);
+    assert_eq!(half.dtype(), DType::F16);
+    let back: Vec<f32> = half.clone().cast(DType::F32).into_data().to_vec().unwrap();
+    assert_eq!(back, vec![1.0, 2.0, 3.0, 4.0]);
+}

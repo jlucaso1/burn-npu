@@ -3,7 +3,7 @@
 #[cfg(any(feature = "apple", feature = "intel", feature = "qualcomm"))]
 use burn_flex::FlexTensor;
 #[cfg(feature = "apple")]
-use burn_tensor::{DType, Shape, TensorData, TensorMetadata};
+use burn_tensor::{f16, DType, Shape, TensorData, TensorMetadata};
 
 // ---------------------------------------------------------------------------
 // NpuFloatTensor — MLTensor handle (apple only)
@@ -40,10 +40,23 @@ impl Drop for NpuFloatTensor {
     }
 }
 
+/// Scalar-type codes shared with the Swift shim's `npu_get_dtype`.
+#[cfg(feature = "apple")]
+pub(super) const DTYPE_F32: i32 = 0;
+#[cfg(feature = "apple")]
+pub(super) const DTYPE_F16: i32 = 1;
+
 #[cfg(feature = "apple")]
 impl burn_tensor::TensorMetadata for NpuFloatTensor {
+    /// Asks the live MLTensor for its scalar type rather than assuming f32.
+    ///
+    /// MLTensor tracks this itself, so querying keeps every op's result dtype
+    /// correct without threading a dtype through all the construction sites.
     fn dtype(&self) -> DType {
-        DType::F32
+        match unsafe { npu_get_dtype(self.handle) } {
+            DTYPE_F16 => DType::F16,
+            _ => DType::F32,
+        }
     }
 
     fn shape(&self) -> Shape {
@@ -108,6 +121,35 @@ pub(super) fn read_f32(handle: i32) -> (Vec<f32>, Vec<usize>) {
     let mut data = vec![0.0f32; total];
     unsafe { npu_get_data(handle, data.as_mut_ptr(), total as i32) };
     (data, shape)
+}
+
+/// Read an f16 tensor back as raw bit patterns.
+#[cfg(feature = "apple")]
+pub(super) fn read_f16(handle: i32) -> (Vec<f16>, Vec<usize>) {
+    let mut shape_buf = [0i32; 8];
+    let ndim = unsafe { npu_get_shape(handle, shape_buf.as_mut_ptr(), 8) } as usize;
+    let shape: Vec<usize> = shape_buf[..ndim].iter().map(|&d| d as usize).collect();
+    let total: usize = shape.iter().product();
+    let mut bits = vec![0u16; total];
+    unsafe { npu_get_data_f16(handle, bits.as_mut_ptr(), total as i32) };
+    (bits.into_iter().map(f16::from_bits).collect(), shape)
+}
+
+/// Upload f16 data to the NPU, keeping it in the ANE's native format.
+#[cfg(feature = "apple")]
+pub(super) fn f16_to_npu(values: &[f16], shape: &[usize]) -> NpuFloatTensor {
+    let dims: Vec<i32> = shape.iter().map(|&d| d as i32).collect();
+    let bits: Vec<u16> = values.iter().map(|v| v.to_bits()).collect();
+    NpuFloatTensor {
+        handle: unsafe {
+            npu_create_tensor_f16(
+                dims.as_ptr(),
+                dims.len() as i32,
+                bits.as_ptr(),
+                bits.len() as i32,
+            )
+        },
+    }
 }
 
 #[cfg(feature = "apple")]

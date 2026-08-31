@@ -18,10 +18,18 @@ use super::{flex_dev, Fx, NpuBurnBackend, NpuBurnDevice};
 use super::ffi::*;
 #[cfg(feature = "apple")]
 use burn_flex::FlexTensor;
+#[cfg(feature = "apple")]
+use burn_tensor::{f16, DType};
 
 #[cfg(feature = "apple")]
 impl FloatTensorOps<Self> for NpuBurnBackend {
     fn float_from_data(data: TensorData, _device: &NpuBurnDevice) -> FloatTensor<Self> {
+        // fp16 is the ANE's native format, so f16 input stays f16 rather than
+        // being widened to f32 on the way in.
+        if data.dtype == DType::F16 {
+            let values: Vec<f16> = data.to_vec().unwrap();
+            return f16_to_npu(&values, &data.shape.to_vec());
+        }
         let floats: Vec<f32> = data.to_vec().unwrap();
         let shape: Vec<i32> = data.shape.iter().map(|&d| d as i32).collect();
         NpuFloatTensor {
@@ -48,30 +56,33 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
         ndarray_to_npu(&nd_tensor)
     }
 
-    fn float_zeros(shape: Shape, _device: &NpuBurnDevice, _dtype: FloatDType) -> FloatTensor<Self> {
+    fn float_zeros(shape: Shape, _device: &NpuBurnDevice, dtype: FloatDType) -> FloatTensor<Self> {
         let s = shape_i32(&shape);
-        NpuFloatTensor {
+        let t = NpuFloatTensor {
             handle: unsafe { npu_zeros(s.as_ptr(), s.len() as i32) },
-        }
+        };
+        Self::float_cast(t, dtype)
     }
 
-    fn float_ones(shape: Shape, _device: &NpuBurnDevice, _dtype: FloatDType) -> FloatTensor<Self> {
+    fn float_ones(shape: Shape, _device: &NpuBurnDevice, dtype: FloatDType) -> FloatTensor<Self> {
         let s = shape_i32(&shape);
-        NpuFloatTensor {
+        let t = NpuFloatTensor {
             handle: unsafe { npu_ones(s.as_ptr(), s.len() as i32) },
-        }
+        };
+        Self::float_cast(t, dtype)
     }
 
     fn float_full(
         shape: Shape,
         fill_value: Scalar,
         _device: &NpuBurnDevice,
-        _dtype: FloatDType,
+        dtype: FloatDType,
     ) -> FloatTensor<Self> {
         let s = shape_i32(&shape);
-        NpuFloatTensor {
+        let t = NpuFloatTensor {
             handle: unsafe { npu_full(s.as_ptr(), s.len() as i32, fill_value.elem::<f32>()) },
-        }
+        };
+        Self::float_cast(t, dtype)
     }
 
     fn float_device(_tensor: &FloatTensor<Self>) -> NpuBurnDevice {
@@ -88,10 +99,14 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
 
     async fn float_into_data(tensor: FloatTensor<Self>) -> Result<TensorData, ExecutionError> {
         let shape = burn_tensor::TensorMetadata::shape(&tensor);
+        if burn_tensor::TensorMetadata::dtype(&tensor) == DType::F16 {
+            let (values, _) = read_f16(tensor.handle);
+            // tensor drops here, freeing the MLTensor handle
+            return Ok(TensorData::new(values, shape));
+        }
         let total: usize = shape.num_elements();
         let mut data = vec![0.0f32; total];
         unsafe { npu_get_data(tensor.handle, data.as_mut_ptr(), total as i32) };
-        // tensor drops here, freeing the MLTensor handle
         Ok(TensorData::new(data, shape))
     }
 
@@ -807,9 +822,14 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
 
     // ── Cast ────────────────────────────────────────────────────────────
 
-    fn float_cast(tensor: FloatTensor<Self>, _dtype: FloatDType) -> FloatTensor<Self> {
-        // MLTensor only supports f32; casting is a no-op
-        tensor
+    fn float_cast(tensor: FloatTensor<Self>, dtype: FloatDType) -> FloatTensor<Self> {
+        let code = match DType::from(dtype) {
+            DType::F16 => DTYPE_F16,
+            _ => DTYPE_F32,
+        };
+        NpuFloatTensor {
+            handle: unsafe { npu_cast_float(tensor.handle, code) },
+        }
     }
 
     // ── Grid sample ─────────────────────────────────────────────────────

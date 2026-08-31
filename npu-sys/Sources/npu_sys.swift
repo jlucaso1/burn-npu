@@ -37,6 +37,43 @@ public func npuCreate(shapePtr: UnsafePointer<Int32>, shapeDims: Int32, dataPtr:
     return store(MLTensor(shape: shape, scalars: data, scalarType: Float.self))
 }
 
+// ── Float16 ──
+//
+// The ANE's native format is fp16; feeding it fp32 costs bandwidth and
+// throughput. f16 values cross the FFI as raw UInt16 bit patterns, which is
+// what Rust's half::f16 stores, so no conversion happens at the boundary.
+
+@_cdecl("npu_create_tensor_f16")
+public func npuCreateF16(shapePtr: UnsafePointer<Int32>, shapeDims: Int32, dataPtr: UnsafePointer<UInt16>, dataLen: Int32) -> Int32 {
+    let shape = (0..<Int(shapeDims)).map { Int(shapePtr[$0]) }
+    let data = (0..<Int(dataLen)).map { Float16(bitPattern: dataPtr[$0]) }
+    return store(MLTensor(shape: shape, scalars: data, scalarType: Float16.self))
+}
+
+/// Scalar type of a live tensor: 0 = f32, 1 = f16, 2 = i32, -1 = unknown.
+///
+/// MLTensor tracks its own scalar type, so the Rust side queries it here rather
+/// than threading a dtype through all 61 tensor construction sites.
+@_cdecl("npu_get_dtype")
+public func npuGetDType(id: Int32) -> Int32 {
+    guard let t = get(id) else { return -1 }
+    if t.scalarType == Float.self { return 0 }
+    if t.scalarType == Float16.self { return 1 }
+    if t.scalarType == Int32.self { return 2 }
+    return -1
+}
+
+/// Cast between float scalar types. `code` matches npu_get_dtype.
+@_cdecl("npu_cast_float")
+public func npuCastFloat(id: Int32, code: Int32) -> Int32 {
+    guard let t = get(id) else { return -1 }
+    switch code {
+    case 0: return store(t.cast(to: Float.self))
+    case 1: return store(t.cast(to: Float16.self))
+    default: return -1
+    }
+}
+
 @_cdecl("npu_create_int_tensor")
 public func npuCreateInt(shapePtr: UnsafePointer<Int32>, shapeDims: Int32, dataPtr: UnsafePointer<Int32>, dataLen: Int32) -> Int32 {
     let shape = (0..<Int(shapeDims)).map { Int(shapePtr[$0]) }
@@ -90,11 +127,25 @@ public func npuGetData(id: Int32, outPtr: UnsafeMutablePointer<Float>, maxLen: I
     guard let t = get(id) else { return -1 }
     let capturedMax = Int(maxLen)
     nonisolated(unsafe) let out = outPtr
-    nonisolated(unsafe) let tensor = t
+    let tensor = t
     return blockingRead {
         let flat = await tensor.shapedArray(of: Float.self).scalars
         let n = min(flat.count, capturedMax)
         for i in 0..<n { out[i] = flat[i] }
+        return Int32(n)
+    }
+}
+
+@_cdecl("npu_get_data_f16")
+public func npuGetDataF16(id: Int32, outPtr: UnsafeMutablePointer<UInt16>, maxLen: Int32) -> Int32 {
+    guard let t = get(id) else { return -1 }
+    let capturedMax = Int(maxLen)
+    nonisolated(unsafe) let out = outPtr
+    let tensor = t
+    return blockingRead {
+        let flat = await tensor.shapedArray(of: Float16.self).scalars
+        let n = min(flat.count, capturedMax)
+        for i in 0..<n { out[i] = flat[i].bitPattern }
         return Int32(n)
     }
 }
@@ -104,7 +155,7 @@ public func npuGetIntData(id: Int32, outPtr: UnsafeMutablePointer<Int32>, maxLen
     guard let t = get(id) else { return -1 }
     let capturedMax = Int(maxLen)
     nonisolated(unsafe) let out = outPtr
-    nonisolated(unsafe) let tensor = t
+    let tensor = t
     return blockingRead {
         let flat = await tensor.shapedArray(of: Int32.self).scalars
         let n = min(flat.count, capturedMax)

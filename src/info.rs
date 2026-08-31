@@ -42,7 +42,11 @@ pub struct NpuInfo {
     /// Peak AI performance in Tera Operations Per Second.
     ///
     /// Typical values: M1 = 11, M2 = 15.8, M3 = 18, M4 = 38,
-    /// Intel Core Ultra = 11.
+    /// Intel Core Ultra = 11, Qualcomm Hexagon = 45.
+    ///
+    /// Apple has not published a figure for the M5 or M6 Neural Engine, so
+    /// those report the M4 value as a floor. Treat this as a rough capability
+    /// hint, not a measurement.
     pub tops: f32,
 
     /// Maximum precision supported for ML operations.

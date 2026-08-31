@@ -3,15 +3,17 @@
 //! Platform-specific float tensor primitives:
 //!
 //! - **`apple`**: `NpuFloatTensor` wraps an `i32` MLTensor handle. All float ops
-//!   pass handles through FFI; no data leaves the NPU between ops.
+//!   pass handles through FFI; no data leaves the NPU between ops. Both f32 and
+//!   f16 are supported, f16 being the ANE's native format.
 //! - **`intel`**: `NpuFloatTensor` is `IntelFloatTensor` (`Vec<f32>` + shape).
 //!   Matmul attempts OpenVINO NPU dispatch; all other ops run on CPU or delegate
-//!   to burn-ndarray.
+//!   to burn-flex.
 //! - **`qualcomm`**: `NpuFloatTensor` is `QnnFloatTensor` (`Vec<f32>` + shape).
-//!   All ops currently run on CPU. Ready for QNN SDK integration.
-//! - **no feature**: `NpuFloatTensor` is `NdArrayTensor` (pure CPU fallback).
+//!   Matmul dispatches to the Hexagon NPU when a QNN SDK was present at build
+//!   time; everything else runs on CPU.
+//! - **no feature**: `NpuFloatTensor` is `FlexTensor` (pure CPU fallback).
 //!
-//! Int/Bool tensor primitives always remain `NdArrayTensor` (delegated to burn-ndarray).
+//! Int/Bool tensor primitives always remain `FlexTensor` (delegated to burn-flex).
 
 extern crate alloc;
 
@@ -24,8 +26,11 @@ mod quantization_ops;
 pub mod tensor;
 
 use alloc::string::String;
-use burn_ndarray::{NdArray, NdArrayDevice, NdArrayQTensor, NdArrayTensor};
-use burn_tensor::backend::{Backend, DeviceId, DeviceOps};
+use burn_flex::{Flex, FlexDevice, FlexQTensor, FlexTensor};
+use burn_tensor::backend::{Backend, BackendTypes, DTypeUsageSet, DeviceId, DeviceOps};
+// Only the apple path narrows dtype_usage; elsewhere it delegates wholesale.
+#[cfg(feature = "apple")]
+use burn_tensor::backend::DTypeUsage;
 use burn_tensor::ops::*;
 use burn_tensor::DType;
 
@@ -33,17 +38,21 @@ use burn_tensor::DType;
 pub use tensor::NpuFloatTensor;
 
 // ---------------------------------------------------------------------------
-// Type alias for the NdArray backend we delegate to.
+// Type alias for the Flex backend we delegate to.
+//
+// `Flex` is `Flex<f32, i32>`; burn-flex only implements `Backend` for that
+// default instantiation, and dispatches element types at runtime via `DType`.
 // ---------------------------------------------------------------------------
-pub(super) type Nd = NdArray<f32, i64, i8>;
+pub(super) type Fx = Flex;
 
 // ---------------------------------------------------------------------------
 // NpuBurnDevice
 // ---------------------------------------------------------------------------
 /// Device type for the NPU burn backend. There is only one logical device.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum NpuBurnDevice {
     /// The default device (routes to ANE when available, falls back to CPU).
+    #[default]
     Default,
 }
 
@@ -60,16 +69,6 @@ impl burn_tensor::backend::Device for NpuBurnDevice {
             index_id: 0,
         }
     }
-
-    fn device_count(_type_id: u16) -> usize {
-        1
-    }
-}
-
-impl Default for NpuBurnDevice {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -78,117 +77,108 @@ impl Default for NpuBurnDevice {
 #[derive(Clone, Copy, Default, Debug)]
 pub struct NpuBurnBackend;
 
-/// Helper: map NpuBurnDevice -> NdArrayDevice for forwarding.
+/// Helper: map NpuBurnDevice -> FlexDevice for forwarding.
 #[inline(always)]
-pub(super) fn nd_dev() -> NdArrayDevice {
-    NdArrayDevice::Cpu
+pub(super) fn flex_dev() -> FlexDevice {
+    FlexDevice
 }
 
 // ===========================================================================
-// Backend impl — apple feature: FloatTensorPrimitive = NpuFloatTensor
+// BackendTypes
+//
+// The only thing that varies per platform is the float primitive: on a real NPU
+// it is the vendor handle/buffer, otherwise it is a plain FlexTensor. Int, bool
+// and quantized primitives always delegate to burn-flex.
 // ===========================================================================
-#[cfg(feature = "apple")]
-impl Backend for NpuBurnBackend {
+#[cfg(any(feature = "apple", feature = "intel", feature = "qualcomm"))]
+impl BackendTypes for NpuBurnBackend {
     type Device = NpuBurnDevice;
 
     type FloatTensorPrimitive = NpuFloatTensor;
     type FloatElem = f32;
 
-    type IntTensorPrimitive = NdArrayTensor;
-    type IntElem = i64;
+    type IntTensorPrimitive = FlexTensor;
+    // i32 matches burn-flex's default int element, so delegated int ops do not
+    // need a dtype conversion on every call.
+    type IntElem = i32;
 
-    type BoolTensorPrimitive = NdArrayTensor;
+    type BoolTensorPrimitive = FlexTensor;
     type BoolElem = bool;
 
-    type QuantizedTensorPrimitive = NdArrayQTensor;
-
-    fn ad_enabled() -> bool {
-        false
-    }
-
-    fn name(_device: &Self::Device) -> String {
-        String::from("Apple ANE")
-    }
-
-    fn seed(_device: &Self::Device, seed: u64) {
-        <Nd as Backend>::seed(&NdArrayDevice::Cpu, seed);
-    }
-
-    fn supports_dtype(_device: &Self::Device, dtype: DType) -> bool {
-        <Nd as Backend>::supports_dtype(&NdArrayDevice::Cpu, dtype)
-    }
+    type QuantizedTensorPrimitive = FlexQTensor;
 }
 
-// ===========================================================================
-// Backend impl — no feature: full NdArray delegation
-// ===========================================================================
 #[cfg(not(any(feature = "apple", feature = "intel", feature = "qualcomm")))]
-impl Backend for NpuBurnBackend {
+impl BackendTypes for NpuBurnBackend {
     type Device = NpuBurnDevice;
 
-    type FloatTensorPrimitive = NdArrayTensor;
+    type FloatTensorPrimitive = FlexTensor;
     type FloatElem = f32;
 
-    type IntTensorPrimitive = NdArrayTensor;
-    type IntElem = i64;
+    type IntTensorPrimitive = FlexTensor;
+    type IntElem = i32;
 
-    type BoolTensorPrimitive = NdArrayTensor;
+    type BoolTensorPrimitive = FlexTensor;
     type BoolElem = bool;
 
-    type QuantizedTensorPrimitive = NdArrayQTensor;
-
-    fn ad_enabled() -> bool {
-        false
-    }
-
-    fn name(_device: &Self::Device) -> String {
-        String::from("CPU fallback")
-    }
-
-    fn seed(_device: &Self::Device, seed: u64) {
-        <Nd as Backend>::seed(&NdArrayDevice::Cpu, seed);
-    }
-
-    fn supports_dtype(_device: &Self::Device, dtype: DType) -> bool {
-        <Nd as Backend>::supports_dtype(&NdArrayDevice::Cpu, dtype)
-    }
+    type QuantizedTensorPrimitive = FlexQTensor;
 }
 
 // ===========================================================================
-// Backend impl — intel/qualcomm: FloatTensorPrimitive = NpuFloatTensor (Vec<f32>)
+// Backend
+//
+// Shared across every feature combination: only the reported name differs.
 // ===========================================================================
-#[cfg(any(feature = "intel", feature = "qualcomm"))]
 impl Backend for NpuBurnBackend {
-    type Device = NpuBurnDevice;
-
-    type FloatTensorPrimitive = NpuFloatTensor;
-    type FloatElem = f32;
-
-    type IntTensorPrimitive = NdArrayTensor;
-    type IntElem = i64;
-
-    type BoolTensorPrimitive = NdArrayTensor;
-    type BoolElem = bool;
-
-    type QuantizedTensorPrimitive = NdArrayQTensor;
-
-    fn ad_enabled() -> bool {
-        false
-    }
-
     fn name(_device: &Self::Device) -> String {
-        #[cfg(feature = "intel")]
-        { String::from("Intel NPU") }
-        #[cfg(feature = "qualcomm")]
-        { String::from("Qualcomm Hexagon") }
+        #[cfg(feature = "apple")]
+        {
+            String::from("Apple ANE")
+        }
+        #[cfg(all(feature = "intel", not(feature = "apple")))]
+        {
+            String::from("Intel NPU")
+        }
+        #[cfg(all(feature = "qualcomm", not(feature = "apple"), not(feature = "intel")))]
+        {
+            String::from("Qualcomm Hexagon")
+        }
+        #[cfg(not(any(feature = "apple", feature = "intel", feature = "qualcomm")))]
+        {
+            String::from("CPU fallback")
+        }
     }
 
     fn seed(_device: &Self::Device, seed: u64) {
-        <Nd as Backend>::seed(&NdArrayDevice::Cpu, seed);
+        <Fx as Backend>::seed(&flex_dev(), seed);
     }
 
-    fn supports_dtype(_device: &Self::Device, dtype: DType) -> bool {
-        <Nd as Backend>::supports_dtype(&NdArrayDevice::Cpu, dtype)
+    /// Report what this backend can actually do, not what the CPU delegate can.
+    ///
+    /// On the apple path float tensors live in MLTensor, which supports f32 and
+    /// f16 but not bf16 or f64. Previously this delegated wholesale to
+    /// burn-flex, so burn was told bf16 and f64 were available and every such
+    /// tensor was silently handled as f32 instead.
+    ///
+    /// Int, bool and quantized dtypes still delegate, because those primitives
+    /// really are burn-flex tensors.
+    fn dtype_usage(_device: &Self::Device, dtype: DType) -> DTypeUsageSet {
+        #[cfg(feature = "apple")]
+        {
+            match dtype {
+                // fp16 is the ANE's native format; fp32 is accepted too.
+                DType::F32 | DType::F16 => {
+                    return DTypeUsage::Storage | DTypeUsage::Arithmetic;
+                }
+                DType::BF16 | DType::F64 => return DTypeUsageSet::empty(),
+                _ => {}
+            }
+        }
+        <Fx as Backend>::dtype_usage(&flex_dev(), dtype)
+    }
+
+    fn device_count(_type_id: u16) -> usize {
+        1
     }
 }
 

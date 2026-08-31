@@ -1,8 +1,10 @@
 [package]
 name = "burn-npu"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
-description = "NPU backend for the Burn deep learning framework. Drop-in replacement that runs on Apple Neural Engine, Intel NPU, and Qualcomm Hexagon."
+# burn 0.21 requires 1.89.
+rust-version = "1.89"
+description = "NPU backend for the Burn deep learning framework. A drop-in replacement targeting Apple Silicon, Intel NPU, and Qualcomm Hexagon through each vendor's own API."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/frane/burn-npu"
 keywords = ["burn", "npu", "neural-engine", "machine-learning", "inference"]
@@ -12,28 +14,42 @@ categories = ["science", "mathematics"]
 default = []
 apple = []
 intel = ["openvino", "openvino-sys"]
-qualcomm = []
+qualcomm = ["dep:libloading", "dep:bindgen"]
 
 [dependencies]
-burn = { version = "0.20" }
-burn-tensor = { version = "0.20" }
-burn-ndarray = { version = "0.20" }
-ndarray = { version = "0.17" }
-openvino = { version = "0.7", optional = true, features = ["runtime-linking"] }
-openvino-sys = { version = "0.7", optional = true, features = ["runtime-linking"] }
+burn = { version = "0.21" }
+burn-tensor = { version = "0.21" }
+burn-flex = { version = "0.21" }
+openvino = { version = "0.11", optional = true, features = ["runtime-linking"] }
+openvino-sys = { version = "0.11", optional = true, features = ["runtime-linking"] }
+# Opens the QNN backend library (libQnnHtp.so / QnnHtp.dll) at runtime, so the
+# qualcomm feature builds on machines without the SDK.
+libloading = { version = "0.9", optional = true }
+
+[build-dependencies]
+# Generates the QNN ABI from the SDK's own headers when QNN_SDK_ROOT is set.
+bindgen = { version = "0.72", optional = true }
 
 [dev-dependencies]
-burn = { version = "0.20" }
-burn-wgpu = { version = "0.20" }
-candle-core = { version = "0.8" }
-candle-nn = { version = "0.8" }
+burn = { version = "0.21" }
+burn-wgpu = { version = "0.21" }
+candle-core = { version = "0.11" }
+candle-nn = { version = "0.11" }
 reqwest = { version = "0.12", features = ["blocking"] }
-indicatif = "0.17"
-tokenizers = "0.21"
-safetensors = "0.4"
-dirs = "5"
+indicatif = "0.18"
+tokenizers = "0.23"
+safetensors = "0.8"
+dirs = "6"
 memmap2 = "0.9"
 
 [[example]]
 name = "bench"
 path = "examples/bench.rs"
+
+[[example]]
+name = "single_matmul"
+path = "examples/single_matmul.rs"
+
+[[example]]
+name = "readback_bench"
+path = "examples/readback_bench.rs"

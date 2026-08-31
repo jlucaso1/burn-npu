@@ -1,4 +1,4 @@
-use burn::tensor::{Tensor, Shape};
+use burn::tensor::{Shape, Tensor};
 use burn_npu::{NpuBurnBackend, NpuBurnDevice};
 
 type B = NpuBurnBackend;
@@ -133,7 +133,10 @@ fn sin_cos_identity() {
     let a = Tensor::<B, 1>::from_floats([0.0, 1.0, 2.0, 3.0], &dev());
     let s = a.clone().sin();
     let c = a.cos();
-    let sum: Vec<f32> = (s.clone() * s + c.clone() * c).into_data().to_vec().unwrap();
+    let sum: Vec<f32> = (s.clone() * s + c.clone() * c)
+        .into_data()
+        .to_vec()
+        .unwrap();
     for v in &sum {
         assert!((v - 1.0).abs() < 1e-4, "sin^2+cos^2 = {v}, expected 1.0");
     }
@@ -174,7 +177,7 @@ fn max_min() {
 #[test]
 fn argmax_dim() {
     let a = Tensor::<B, 2>::from_floats([[1.0, 3.0, 2.0], [5.0, 4.0, 6.0]], &dev());
-    let idx: Vec<i64> = a.argmax(1).into_data().to_vec().unwrap();
+    let idx: Vec<i32> = a.argmax(1).into_data().to_vec().unwrap();
     assert_eq!(idx, vec![1, 2]);
 }
 
@@ -271,7 +274,7 @@ fn zeros_and_ones() {
 #[test]
 fn int_from_data() {
     let a = Tensor::<B, 1, burn::tensor::Int>::from_ints([1, 2, 3], &dev());
-    let d: Vec<i64> = a.into_data().to_vec().unwrap();
+    let d: Vec<i32> = a.into_data().to_vec().unwrap();
     assert_eq!(d, vec![1, 2, 3]);
 }
 
@@ -284,4 +287,135 @@ fn bool_equal() {
     let eq = a.equal(b);
     let d: Vec<bool> = eq.into_data().to_vec().unwrap();
     assert_eq!(d, vec![true, false, true]);
+}
+
+// ── Masking ──
+//
+// On the apple backend these run on the NPU via npu_mask_fill/npu_mask_where
+// rather than round-tripping to the CPU, so they need direct coverage.
+
+#[test]
+fn mask_fill_replaces_selected_elements() {
+    let a = Tensor::<B, 2>::from_floats([[1.0, 2.0], [3.0, 4.0]], &dev());
+    let mask = a.clone().greater_elem(2.0);
+    let out: Vec<f32> = a.mask_fill(mask, 0.0).into_data().to_vec().unwrap();
+    assert_eq!(out, vec![1.0, 2.0, 0.0, 0.0]);
+}
+
+#[test]
+fn mask_fill_with_all_false_mask_is_identity() {
+    let a = Tensor::<B, 2>::from_floats([[1.0, 2.0], [3.0, 4.0]], &dev());
+    let mask = a.clone().greater_elem(100.0);
+    let out: Vec<f32> = a.mask_fill(mask, -1.0).into_data().to_vec().unwrap();
+    assert_eq!(out, vec![1.0, 2.0, 3.0, 4.0]);
+}
+
+#[test]
+fn mask_fill_with_all_true_mask_replaces_everything() {
+    let a = Tensor::<B, 2>::from_floats([[1.0, 2.0], [3.0, 4.0]], &dev());
+    let mask = a.clone().greater_elem(-1.0);
+    let out: Vec<f32> = a.mask_fill(mask, 7.0).into_data().to_vec().unwrap();
+    assert_eq!(out, vec![7.0, 7.0, 7.0, 7.0]);
+}
+
+#[test]
+fn mask_where_selects_between_tensors() {
+    let a = Tensor::<B, 2>::from_floats([[1.0, 2.0], [3.0, 4.0]], &dev());
+    let b = Tensor::<B, 2>::from_floats([[10.0, 20.0], [30.0, 40.0]], &dev());
+    let mask = a.clone().greater_elem(2.0);
+    let out: Vec<f32> = a.mask_where(mask, b).into_data().to_vec().unwrap();
+    assert_eq!(out, vec![1.0, 2.0, 30.0, 40.0]);
+}
+
+/// The attention-style shape: mask a 3D tensor with a large negative value
+/// before softmax.
+#[test]
+fn mask_fill_on_batched_tensor() {
+    let a =
+        Tensor::<B, 3>::from_floats([[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]], &dev());
+    let mask = a.clone().greater_elem(4.0);
+    let out: Vec<f32> = a.mask_fill(mask, -1.0).into_data().to_vec().unwrap();
+    assert_eq!(out, vec![1.0, 2.0, 3.0, 4.0, -1.0, -1.0, -1.0, -1.0]);
+}
+
+// ── Precision ──
+//
+// fp16 is the ANE's native format. These pin that an f16 tensor stays f16
+// through the backend rather than being silently widened to f32.
+
+#[test]
+fn f16_tensor_reports_f16_dtype() {
+    use burn::tensor::TensorData;
+    use burn_tensor::f16;
+
+    let data = TensorData::new(
+        vec![f16::from_f32(1.0), f16::from_f32(2.0)],
+        vec![1usize, 2],
+    );
+    let t = Tensor::<B, 2>::from_data(data, (&dev(), burn::tensor::DType::F16));
+    assert_eq!(t.dtype(), burn::tensor::DType::F16);
+}
+
+#[test]
+fn f16_roundtrips_through_the_backend() {
+    use burn::tensor::TensorData;
+    use burn_tensor::f16;
+
+    let values: Vec<f16> = [1.0f32, -2.5, 0.25, 100.0]
+        .iter()
+        .map(|&v| f16::from_f32(v))
+        .collect();
+    let t = Tensor::<B, 2>::from_data(
+        TensorData::new(values, vec![2usize, 2]),
+        (&dev(), burn::tensor::DType::F16),
+    );
+    assert_eq!(t.dtype(), burn::tensor::DType::F16);
+    let out: Vec<f16> = t.into_data().to_vec().unwrap();
+    let out: Vec<f32> = out.iter().map(|v| v.to_f32()).collect();
+    assert_eq!(out, vec![1.0, -2.5, 0.25, 100.0]);
+}
+
+#[test]
+fn f16_matmul_is_correct() {
+    use burn::tensor::{DType, TensorData};
+    use burn_tensor::f16;
+
+    let a = TensorData::new(
+        vec![
+            f16::from_f32(1.0),
+            f16::from_f32(2.0),
+            f16::from_f32(3.0),
+            f16::from_f32(4.0),
+        ],
+        vec![2usize, 2],
+    );
+    let b = TensorData::new(
+        vec![
+            f16::from_f32(5.0),
+            f16::from_f32(6.0),
+            f16::from_f32(7.0),
+            f16::from_f32(8.0),
+        ],
+        vec![2usize, 2],
+    );
+    let x = Tensor::<B, 2>::from_data(a, (&dev(), DType::F16));
+    let y = Tensor::<B, 2>::from_data(b, (&dev(), DType::F16));
+    let out = x.matmul(y);
+    // The result stays in f16 rather than being widened back to f32.
+    assert_eq!(out.dtype(), DType::F16);
+    let got: Vec<f16> = out.into_data().to_vec().unwrap();
+    let got: Vec<f32> = got.iter().map(|v| v.to_f32()).collect();
+    assert_eq!(got, vec![19.0, 22.0, 43.0, 50.0]);
+}
+
+#[test]
+fn cast_to_f16_actually_casts() {
+    use burn::tensor::DType;
+
+    let a = Tensor::<B, 2>::from_floats([[1.0, 2.0], [3.0, 4.0]], &dev());
+    assert_eq!(a.dtype(), DType::F32);
+    let half = a.cast(DType::F16);
+    assert_eq!(half.dtype(), DType::F16);
+    let back: Vec<f32> = half.clone().cast(DType::F32).into_data().to_vec().unwrap();
+    assert_eq!(back, vec![1.0, 2.0, 3.0, 4.0]);
 }

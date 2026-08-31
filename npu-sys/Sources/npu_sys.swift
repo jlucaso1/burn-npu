@@ -37,6 +37,43 @@ public func npuCreate(shapePtr: UnsafePointer<Int32>, shapeDims: Int32, dataPtr:
     return store(MLTensor(shape: shape, scalars: data, scalarType: Float.self))
 }
 
+// ── Float16 ──
+//
+// The ANE's native format is fp16; feeding it fp32 costs bandwidth and
+// throughput. f16 values cross the FFI as raw UInt16 bit patterns, which is
+// what Rust's half::f16 stores, so no conversion happens at the boundary.
+
+@_cdecl("npu_create_tensor_f16")
+public func npuCreateF16(shapePtr: UnsafePointer<Int32>, shapeDims: Int32, dataPtr: UnsafePointer<UInt16>, dataLen: Int32) -> Int32 {
+    let shape = (0..<Int(shapeDims)).map { Int(shapePtr[$0]) }
+    let data = (0..<Int(dataLen)).map { Float16(bitPattern: dataPtr[$0]) }
+    return store(MLTensor(shape: shape, scalars: data, scalarType: Float16.self))
+}
+
+/// Scalar type of a live tensor: 0 = f32, 1 = f16, 2 = i32, -1 = unknown.
+///
+/// MLTensor tracks its own scalar type, so the Rust side queries it here rather
+/// than threading a dtype through all 61 tensor construction sites.
+@_cdecl("npu_get_dtype")
+public func npuGetDType(id: Int32) -> Int32 {
+    guard let t = get(id) else { return -1 }
+    if t.scalarType == Float.self { return 0 }
+    if t.scalarType == Float16.self { return 1 }
+    if t.scalarType == Int32.self { return 2 }
+    return -1
+}
+
+/// Cast between float scalar types. `code` matches npu_get_dtype.
+@_cdecl("npu_cast_float")
+public func npuCastFloat(id: Int32, code: Int32) -> Int32 {
+    guard let t = get(id) else { return -1 }
+    switch code {
+    case 0: return store(t.cast(to: Float.self))
+    case 1: return store(t.cast(to: Float16.self))
+    default: return -1
+    }
+}
+
 @_cdecl("npu_create_int_tensor")
 public func npuCreateInt(shapePtr: UnsafePointer<Int32>, shapeDims: Int32, dataPtr: UnsafePointer<Int32>, dataLen: Int32) -> Int32 {
     let shape = (0..<Int(shapeDims)).map { Int(shapePtr[$0]) }
@@ -64,54 +101,86 @@ public func npuGetShape(id: Int32, outPtr: UnsafeMutablePointer<Int32>, maxDims:
     return Int32(s.count)
 }
 
+// ── Async → sync bridge ──
+//
+// MLTensor materialises lazily and asynchronously, but the C ABI is
+// synchronous. Callers always arrive on Rust-owned threads, never on Swift's
+// cooperative pool, so blocking one of them here cannot starve the executor
+// running the task.
+//
+// This previously spawned a fresh OS thread per readback and spun a RunLoop at
+// 0.1 ms until the task finished. Every comparison op and every `into_data`
+// pays this cost, so it is worth keeping cheap.
+private func blockingRead(_ body: @escaping @Sendable () async -> Int32) -> Int32 {
+    let sem = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var result: Int32 = -1
+    Task.detached(priority: .userInitiated) {
+        result = await body()
+        sem.signal()
+    }
+    sem.wait()
+    return result
+}
+
 @_cdecl("npu_get_data")
 public func npuGetData(id: Int32, outPtr: UnsafeMutablePointer<Float>, maxLen: Int32) -> Int32 {
     guard let t = get(id) else { return -1 }
-    let sem = DispatchSemaphore(value: 0)
-    var count: Int32 = -1
-    let tensor = t
     let capturedMax = Int(maxLen)
-    Thread.detachNewThread {
-        let r = RunLoop.current
-        nonisolated(unsafe) var done = false
-        Task {
-            let arr = await tensor.shapedArray(of: Float.self)
-            let flat = arr.scalars
-            let n = min(flat.count, capturedMax)
-            for i in 0..<n { outPtr[i] = flat[i] }
+    nonisolated(unsafe) let out = outPtr
+    let tensor = t
+    return blockingRead {
+        // MLShapedArray.scalars is ~420x slower than reading the backing
+        // buffer directly: 23.9 ms vs 0.06 ms for a 512x768 tensor, which was
+        // dwarfing the matmul that produced it. shapedArray(of:) returns a
+        // freshly materialised dense array, so the buffer is contiguous.
+        let arr = await tensor.shapedArray(of: Float.self)
+        var count: Int32 = 0
+        arr.withUnsafeShapedBufferPointer { buf, _, _ in
+            let n = min(buf.count, capturedMax)
+            out.update(from: buf.baseAddress!, count: n)
             count = Int32(n)
-            done = true
-            sem.signal()
         }
-        while !done { r.run(mode: .default, before: Date(timeIntervalSinceNow: 0.0001)) }
+        return count
     }
-    sem.wait()
-    return count
+}
+
+@_cdecl("npu_get_data_f16")
+public func npuGetDataF16(id: Int32, outPtr: UnsafeMutablePointer<UInt16>, maxLen: Int32) -> Int32 {
+    guard let t = get(id) else { return -1 }
+    let capturedMax = Int(maxLen)
+    nonisolated(unsafe) let out = outPtr
+    let tensor = t
+    return blockingRead {
+        let arr = await tensor.shapedArray(of: Float16.self)
+        var count: Int32 = 0
+        arr.withUnsafeShapedBufferPointer { buf, _, _ in
+            let n = min(buf.count, capturedMax)
+            // Float16 and UInt16 share a layout, so this stays a bulk copy.
+            buf.baseAddress!.withMemoryRebound(to: UInt16.self, capacity: n) {
+                out.update(from: $0, count: n)
+            }
+            count = Int32(n)
+        }
+        return count
+    }
 }
 
 @_cdecl("npu_get_int_data")
 public func npuGetIntData(id: Int32, outPtr: UnsafeMutablePointer<Int32>, maxLen: Int32) -> Int32 {
     guard let t = get(id) else { return -1 }
-    let sem = DispatchSemaphore(value: 0)
-    var count: Int32 = -1
-    let tensor = t
     let capturedMax = Int(maxLen)
-    Thread.detachNewThread {
-        let r = RunLoop.current
-        nonisolated(unsafe) var done = false
-        Task {
-            let arr = await tensor.shapedArray(of: Int32.self)
-            let flat = arr.scalars
-            let n = min(flat.count, capturedMax)
-            for i in 0..<n { outPtr[i] = flat[i] }
+    nonisolated(unsafe) let out = outPtr
+    let tensor = t
+    return blockingRead {
+        let arr = await tensor.shapedArray(of: Int32.self)
+        var count: Int32 = 0
+        arr.withUnsafeShapedBufferPointer { buf, _, _ in
+            let n = min(buf.count, capturedMax)
+            out.update(from: buf.baseAddress!, count: n)
             count = Int32(n)
-            done = true
-            sem.signal()
         }
-        while !done { r.run(mode: .default, before: Date(timeIntervalSinceNow: 0.0001)) }
+        return count
     }
-    sem.wait()
-    return count
 }
 
 @_cdecl("npu_scalar_tensor")

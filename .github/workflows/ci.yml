@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    # Weekly. Cargo.lock is not committed, so this is what catches upstream
+    # breakage before it becomes a four-month-old broken release.
+    - cron: '0 6 * * 1'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  lint:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --features intel --all-targets -- -D warnings
+      - run: cargo clippy --features qualcomm --all-targets -- -D warnings
+
+  # Every feature must at least compile on both non-Apple platforms. The
+  # `intel` feature uses openvino runtime-linking and `qualcomm` opens the QNN
+  # backend at runtime, so neither needs its vendor runtime installed here.
+  #
+  # Windows matters specifically because detect.rs has Windows-only probes for
+  # both the QNN HTP DLL and the OpenVINO DLL that no other job compiles.
+  check:
+    name: check (${{ matrix.feature }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        feature: [default, intel, qualcomm]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo check
+        shell: bash
+        run: |
+          if [ "${{ matrix.feature }}" = "default" ]; then
+            cargo check --all-targets
+          else
+            cargo check --features ${{ matrix.feature }} --all-targets
+          fi
+
+  # The apple feature needs macOS 15+ for MLTensor and swiftc for npu-sys.
+  # This is the only job that runs the test suite against real NPU dispatch.
+  test-apple:
+    name: test (apple, macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: swiftc --version
+      - run: cargo test --features apple
+      - run: cargo test

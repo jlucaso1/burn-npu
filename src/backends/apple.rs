@@ -34,7 +34,9 @@ mod inner {
     impl NpuTensor {
         pub fn from_data(shape: &[usize], data: &[f32]) -> Self {
             let s: Vec<i32> = shape.iter().map(|&d| d as i32).collect();
-            let id = unsafe { npu_create_tensor(s.as_ptr(), s.len() as i32, data.as_ptr(), data.len() as i32) };
+            let id = unsafe {
+                npu_create_tensor(s.as_ptr(), s.len() as i32, data.as_ptr(), data.len() as i32)
+            };
             Self(id)
         }
 
@@ -85,7 +87,7 @@ mod inner {
         /// GELU activation: 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
         pub fn gelu(&self) -> NpuTensor {
             let x3 = self.mul(self).mul(self);
-            let inner = self.add(&x3.scale(0.044715)).scale(0.7978845608); // sqrt(2/pi)
+            let inner = self.add(&x3.scale(0.044715)).scale(0.797_884_6); // sqrt(2/pi)
             let tanh_val = inner.tanh();
             let one = NpuTensor::scalar(1.0);
             self.mul(&tanh_val.add(&one)).scale(0.5)
@@ -127,8 +129,11 @@ mod inner {
             // Get shape, compute keepdim shape, reshape.
             let mut shape_buf = [0i32; 8];
             let ndim = unsafe { npu_get_shape(self.0, shape_buf.as_mut_ptr(), 8) } as usize;
-            let mut keepdim_shape: Vec<usize> = shape_buf[..ndim].iter().map(|&d| d as usize).collect();
-            if let Some(last) = keepdim_shape.last_mut() { *last = 1; }
+            let mut keepdim_shape: Vec<usize> =
+                shape_buf[..ndim].iter().map(|&d| d as usize).collect();
+            if let Some(last) = keepdim_shape.last_mut() {
+                *last = 1;
+            }
 
             let mean = self.mean(-1).reshape(&keepdim_shape);
             let diff = self.sub(&mean);
@@ -147,7 +152,6 @@ mod inner {
         }
     }
 
-
     pub struct AppleNpuBackend;
 
     #[derive(Debug)]
@@ -156,15 +160,26 @@ mod inner {
     }
     impl std::fmt::Display for AppleNpuError {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self { Self::OpFailed(m) => write!(f, "Apple NPU: {m}") }
+            match self {
+                Self::OpFailed(m) => write!(f, "Apple NPU: {m}"),
+            }
         }
     }
     impl std::error::Error for AppleNpuError {}
 
     impl AppleNpuBackend {
-        pub fn new() -> Result<Self, AppleNpuError> { Ok(Self) }
+        pub fn new() -> Result<Self, AppleNpuError> {
+            Ok(Self)
+        }
 
-        pub fn matmul(&self, a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Result<Vec<f32>, AppleNpuError> {
+        pub fn matmul(
+            &self,
+            a: &[f32],
+            b: &[f32],
+            m: usize,
+            k: usize,
+            n: usize,
+        ) -> Result<Vec<f32>, AppleNpuError> {
             let ta = NpuTensor::from_data(&[m, k], a);
             let tb = NpuTensor::from_data(&[k, n], b);
             Ok(ta.matmul(&tb).to_vec())
@@ -180,7 +195,13 @@ mod inner {
             Ok(t.softmax(-1).to_vec())
         }
 
-        pub fn layernorm(&self, x: &[f32], shape: &[usize], gamma: &[f32], beta: &[f32]) -> Result<Vec<f32>, AppleNpuError> {
+        pub fn layernorm(
+            &self,
+            x: &[f32],
+            shape: &[usize],
+            gamma: &[f32],
+            beta: &[f32],
+        ) -> Result<Vec<f32>, AppleNpuError> {
             let last = *shape.last().unwrap();
             let tx = NpuTensor::from_data(shape, x);
             let tg = NpuTensor::from_data(&[last], gamma);
@@ -200,18 +221,45 @@ pub use stub::*;
 mod stub {
     use std::path::Path;
     #[derive(Debug)]
-    pub enum AppleNpuError { NotSupported }
+    pub enum AppleNpuError {
+        NotSupported,
+    }
     impl std::fmt::Display for AppleNpuError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "Apple NPU: macOS only") }
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "Apple NPU: macOS only")
+        }
     }
     impl std::error::Error for AppleNpuError {}
     pub struct AppleNpuBackend;
     impl AppleNpuBackend {
-        pub fn new() -> Result<Self, AppleNpuError> { Err(AppleNpuError::NotSupported) }
-        pub fn matmul(&self, _: &[f32], _: &[f32], _: usize, _: usize, _: usize) -> Result<Vec<f32>, AppleNpuError> { Err(AppleNpuError::NotSupported) }
-        pub fn relu(&self, _: &[f32], _: &[usize]) -> Result<Vec<f32>, AppleNpuError> { Err(AppleNpuError::NotSupported) }
-        pub fn softmax(&self, _: &[f32], _: &[usize]) -> Result<Vec<f32>, AppleNpuError> { Err(AppleNpuError::NotSupported) }
-        pub fn layernorm(&self, _: &[f32], _: &[usize], _: &[f32], _: &[f32]) -> Result<Vec<f32>, AppleNpuError> { Err(AppleNpuError::NotSupported) }
+        pub fn new() -> Result<Self, AppleNpuError> {
+            Err(AppleNpuError::NotSupported)
+        }
+        pub fn matmul(
+            &self,
+            _: &[f32],
+            _: &[f32],
+            _: usize,
+            _: usize,
+            _: usize,
+        ) -> Result<Vec<f32>, AppleNpuError> {
+            Err(AppleNpuError::NotSupported)
+        }
+        pub fn relu(&self, _: &[f32], _: &[usize]) -> Result<Vec<f32>, AppleNpuError> {
+            Err(AppleNpuError::NotSupported)
+        }
+        pub fn softmax(&self, _: &[f32], _: &[usize]) -> Result<Vec<f32>, AppleNpuError> {
+            Err(AppleNpuError::NotSupported)
+        }
+        pub fn layernorm(
+            &self,
+            _: &[f32],
+            _: &[usize],
+            _: &[f32],
+            _: &[f32],
+        ) -> Result<Vec<f32>, AppleNpuError> {
+            Err(AppleNpuError::NotSupported)
+        }
     }
     #[derive(Clone, Copy)]
     pub struct NpuTensor(i32);

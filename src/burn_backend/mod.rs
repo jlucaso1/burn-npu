@@ -41,9 +41,10 @@ pub(super) type Nd = NdArray<f32, i64, i8>;
 // NpuBurnDevice
 // ---------------------------------------------------------------------------
 /// Device type for the NPU burn backend. There is only one logical device.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum NpuBurnDevice {
     /// The default device (routes to ANE when available, falls back to CPU).
+    #[default]
     Default,
 }
 
@@ -63,12 +64,6 @@ impl burn_tensor::backend::Device for NpuBurnDevice {
 
     fn device_count(_type_id: u16) -> usize {
         1
-    }
-}
-
-impl Default for NpuBurnDevice {
-    fn default() -> Self {
-        Self::Default
     }
 }
 

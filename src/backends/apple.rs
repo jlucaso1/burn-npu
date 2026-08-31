@@ -85,7 +85,7 @@ mod inner {
         /// GELU activation: 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
         pub fn gelu(&self) -> NpuTensor {
             let x3 = self.mul(self).mul(self);
-            let inner = self.add(&x3.scale(0.044715)).scale(0.7978845608); // sqrt(2/pi)
+            let inner = self.add(&x3.scale(0.044715)).scale(0.797_884_6); // sqrt(2/pi)
             let tanh_val = inner.tanh();
             let one = NpuTensor::scalar(1.0);
             self.mul(&tanh_val.add(&one)).scale(0.5)

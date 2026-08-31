@@ -36,4 +36,19 @@ fn main() {
         elapsed,
         elapsed / n
     );
+
+    // Attention-shaped masking: on the apple backend this should stay on the
+    // NPU rather than materialising the value tensor's pending graph.
+    let big = Tensor::<B, 3>::zeros([8, 64, 64], &device) + 1.0;
+    let mask = big.clone().greater_elem(0.5);
+    let start = Instant::now();
+    for _ in 0..n {
+        let _ = big.clone().mask_fill(mask.clone(), -1.0e9);
+    }
+    let elapsed = start.elapsed();
+    println!(
+        "{n} mask_fill 8x64x64: {:?} total, {:?} each",
+        elapsed,
+        elapsed / n
+    );
 }

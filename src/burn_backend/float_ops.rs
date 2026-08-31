@@ -354,16 +354,19 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
 
     // ── Mask ────────────────────────────────────────────────────────────
 
+    // Masking stays on the NPU. Uploading the mask keeps the value tensor's
+    // MLTensor graph lazy; round-tripping it through the CPU would force the
+    // whole pending computation to materialise, which on an attention mask is
+    // the hot path.
     fn float_mask_where(
         tensor: FloatTensor<Self>,
         mask: BoolTensor<Self>,
         value: FloatTensor<Self>,
     ) -> FloatTensor<Self> {
-        // Round-trip: mask is FlexTensor<bool>, needs conversion
-        let nd_tensor = npu_to_ndarray(&tensor);
-        let nd_value = npu_to_ndarray(&value);
-        let result = <Fx as FloatTensorOps<Fx>>::float_mask_where(nd_tensor, mask, nd_value);
-        ndarray_to_npu(&result)
+        let mask = bool_mask_to_npu(mask);
+        NpuFloatTensor {
+            handle: unsafe { npu_mask_where(tensor.handle, mask.handle, value.handle) },
+        }
     }
 
     fn float_mask_fill(
@@ -371,9 +374,10 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
         mask: BoolTensor<Self>,
         value: Scalar,
     ) -> FloatTensor<Self> {
-        let nd_tensor = npu_to_ndarray(&tensor);
-        let result = <Fx as FloatTensorOps<Fx>>::float_mask_fill(nd_tensor, mask, value);
-        ndarray_to_npu(&result)
+        let mask = bool_mask_to_npu(mask);
+        NpuFloatTensor {
+            handle: unsafe { npu_mask_fill(tensor.handle, mask.handle, value.elem::<f32>()) },
+        }
     }
 
     // ── Comparison (return BoolTensor = FlexTensor<bool>) ────────────

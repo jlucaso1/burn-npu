@@ -180,6 +180,33 @@ pub(super) fn int_handle_to_ndarray(handle: i32) -> FlexTensor {
     FlexTensor::from_data(TensorData::new(int_data, shape))
 }
 
+/// Upload a CPU bool mask to the NPU as a 0.0/1.0 float tensor.
+///
+/// The on-device `npu_mask_fill`/`npu_mask_where` ops threshold their mask at
+/// 0.5, so a float mask is what they expect. Uploading the mask is much
+/// cheaper than the alternative of materialising the float tensor: it moves
+/// half as much data, and crucially it does not force the lazy MLTensor graph
+/// for the value tensor to be evaluated.
+#[cfg(feature = "apple")]
+pub(super) fn bool_mask_to_npu(mask: FlexTensor) -> NpuFloatTensor {
+    let shape: Vec<i32> = TensorMetadata::shape(&mask)
+        .iter()
+        .map(|&d| d as i32)
+        .collect();
+    let bits: Vec<bool> = mask.into_data().to_vec().expect("bool mask");
+    let floats: Vec<f32> = bits.iter().map(|&b| if b { 1.0 } else { 0.0 }).collect();
+    NpuFloatTensor {
+        handle: unsafe {
+            npu_create_tensor(
+                shape.as_ptr(),
+                shape.len() as i32,
+                floats.as_ptr(),
+                floats.len() as i32,
+            )
+        },
+    }
+}
+
 /// Read a comparison result handle as a bool tensor, inverting it.
 ///
 /// `greater_equal` is `NOT less` and `lower_equal` is `NOT greater`; MLTensor

@@ -288,3 +288,52 @@ fn bool_equal() {
     let d: Vec<bool> = eq.into_data().to_vec().unwrap();
     assert_eq!(d, vec![true, false, true]);
 }
+
+// ── Masking ──
+//
+// On the apple backend these run on the NPU via npu_mask_fill/npu_mask_where
+// rather than round-tripping to the CPU, so they need direct coverage.
+
+#[test]
+fn mask_fill_replaces_selected_elements() {
+    let a = Tensor::<B, 2>::from_floats([[1.0, 2.0], [3.0, 4.0]], &dev());
+    let mask = a.clone().greater_elem(2.0);
+    let out: Vec<f32> = a.mask_fill(mask, 0.0).into_data().to_vec().unwrap();
+    assert_eq!(out, vec![1.0, 2.0, 0.0, 0.0]);
+}
+
+#[test]
+fn mask_fill_with_all_false_mask_is_identity() {
+    let a = Tensor::<B, 2>::from_floats([[1.0, 2.0], [3.0, 4.0]], &dev());
+    let mask = a.clone().greater_elem(100.0);
+    let out: Vec<f32> = a.mask_fill(mask, -1.0).into_data().to_vec().unwrap();
+    assert_eq!(out, vec![1.0, 2.0, 3.0, 4.0]);
+}
+
+#[test]
+fn mask_fill_with_all_true_mask_replaces_everything() {
+    let a = Tensor::<B, 2>::from_floats([[1.0, 2.0], [3.0, 4.0]], &dev());
+    let mask = a.clone().greater_elem(-1.0);
+    let out: Vec<f32> = a.mask_fill(mask, 7.0).into_data().to_vec().unwrap();
+    assert_eq!(out, vec![7.0, 7.0, 7.0, 7.0]);
+}
+
+#[test]
+fn mask_where_selects_between_tensors() {
+    let a = Tensor::<B, 2>::from_floats([[1.0, 2.0], [3.0, 4.0]], &dev());
+    let b = Tensor::<B, 2>::from_floats([[10.0, 20.0], [30.0, 40.0]], &dev());
+    let mask = a.clone().greater_elem(2.0);
+    let out: Vec<f32> = a.mask_where(mask, b).into_data().to_vec().unwrap();
+    assert_eq!(out, vec![1.0, 2.0, 30.0, 40.0]);
+}
+
+/// The attention-style shape: mask a 3D tensor with a large negative value
+/// before softmax.
+#[test]
+fn mask_fill_on_batched_tensor() {
+    let a =
+        Tensor::<B, 3>::from_floats([[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]], &dev());
+    let mask = a.clone().greater_elem(4.0);
+    let out: Vec<f32> = a.mask_fill(mask, -1.0).into_data().to_vec().unwrap();
+    assert_eq!(out, vec![1.0, 2.0, 3.0, 4.0, -1.0, -1.0, -1.0, -1.0]);
+}

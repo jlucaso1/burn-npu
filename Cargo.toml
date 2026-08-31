@@ -47,5 +47,9 @@ name = "bench"
 path = "examples/bench.rs"
 
 [[example]]
+name = "single_matmul"
+path = "examples/single_matmul.rs"
+
+[[example]]
 name = "readback_bench"
 path = "examples/readback_bench.rs"

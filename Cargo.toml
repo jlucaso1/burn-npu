@@ -14,7 +14,7 @@ categories = ["science", "mathematics"]
 default = []
 apple = []
 intel = ["openvino", "openvino-sys"]
-qualcomm = []
+qualcomm = ["dep:libloading", "dep:bindgen"]
 
 [dependencies]
 burn = { version = "0.21" }
@@ -22,6 +22,13 @@ burn-tensor = { version = "0.21" }
 burn-flex = { version = "0.21" }
 openvino = { version = "0.11", optional = true, features = ["runtime-linking"] }
 openvino-sys = { version = "0.11", optional = true, features = ["runtime-linking"] }
+# Opens the QNN backend library (libQnnHtp.so / QnnHtp.dll) at runtime, so the
+# qualcomm feature builds on machines without the SDK.
+libloading = { version = "0.9", optional = true }
+
+[build-dependencies]
+# Generates the QNN ABI from the SDK's own headers when QNN_SDK_ROOT is set.
+bindgen = { version = "0.72", optional = true }
 
 [dev-dependencies]
 burn = { version = "0.21" }

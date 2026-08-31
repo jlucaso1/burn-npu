@@ -4,8 +4,12 @@ use crate::info::{NpuInfo, NpuVendor, Precision};
 ///
 /// Detection is platform-specific:
 /// - **macOS**: checks for Apple Silicon via `sysctl hw.optional.arm64`
-/// - **Linux**: checks `/proc/cpuinfo` for Intel + `/dev/accel*` for NPU device
-/// - **Windows**: checks for OpenVINO DLL in standard install paths
+/// - **Linux**: checks the device tree / `/proc/cpuinfo` for Qualcomm, then
+///   `/proc/cpuinfo` for Intel + `/dev/accel*` for an NPU device
+/// - **Windows**: checks for the QNN HTP backend DLL, then for OpenVINO
+///
+/// Qualcomm is probed before Intel because the checks are mutually exclusive
+/// and the Qualcomm one is cheaper.
 ///
 /// Returns `None` if no NPU is detected or on unsupported platforms.
 pub fn detect() -> Option<NpuInfo> {
@@ -18,6 +22,9 @@ pub fn detect() -> Option<NpuInfo> {
 
     #[cfg(target_os = "linux")]
     {
+        if let Some(info) = detect_qualcomm_linux() {
+            return Some(info);
+        }
         if let Some(info) = detect_intel_linux() {
             return Some(info);
         }
@@ -25,6 +32,9 @@ pub fn detect() -> Option<NpuInfo> {
 
     #[cfg(target_os = "windows")]
     {
+        if let Some(info) = detect_qualcomm_windows() {
+            return Some(info);
+        }
         if let Some(info) = detect_intel_windows() {
             return Some(info);
         }
@@ -143,5 +153,70 @@ fn detect_intel_windows() -> Option<NpuInfo> {
         tops: 11.0,
         max_precision: Precision::INT8,
         description: "Intel NPU (OpenVINO detected)".to_string(),
+    })
+}
+
+// ── Linux: Qualcomm Hexagon NPU ────────────────────────────────────────
+
+/// Detect a Snapdragon SoC on Linux.
+///
+/// The device-tree model string is the reliable signal on ARM64 Linux;
+/// `/proc/cpuinfo` reports the Qualcomm implementer ID (0x51) as a fallback.
+/// Neither confirms that the QNN SDK is installed -- that is a build-time
+/// concern handled in `build.rs`.
+#[cfg(target_os = "linux")]
+fn detect_qualcomm_qualifier() -> Option<String> {
+    if let Ok(model) = std::fs::read_to_string("/proc/device-tree/model") {
+        let model = model.trim_end_matches('\0').trim().to_string();
+        if model.to_lowercase().contains("qualcomm") || model.to_lowercase().contains("snapdragon")
+        {
+            return Some(model);
+        }
+    }
+
+    let cpuinfo = std::fs::read_to_string("/proc/cpuinfo").ok()?;
+    let lower = cpuinfo.to_lowercase();
+    // 0x51 is Qualcomm's ARM implementer ID.
+    if lower.contains("qualcomm") || lower.contains("cpu implementer\t: 0x51") {
+        return Some("Qualcomm Snapdragon".to_string());
+    }
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn detect_qualcomm_linux() -> Option<NpuInfo> {
+    let model = detect_qualcomm_qualifier()?;
+    Some(NpuInfo {
+        vendor: NpuVendor::Qualcomm,
+        // Conservative: Hexagon TOPS vary widely across Snapdragon generations
+        // and are not discoverable without the SDK.
+        tops: 45.0,
+        max_precision: Precision::INT8,
+        description: format!("Qualcomm Hexagon NPU -- {model}"),
+    })
+}
+
+// ── Windows: Qualcomm Hexagon NPU ──────────────────────────────────────
+
+/// Detect the QNN HTP backend on Windows on Snapdragon.
+///
+/// Presence of the HTP backend DLL is the practical signal: it ships with the
+/// Snapdragon driver stack, so finding it means both the hardware and the
+/// runtime are there.
+#[cfg(target_os = "windows")]
+fn detect_qualcomm_windows() -> Option<NpuInfo> {
+    let candidates = [
+        r"C:\Windows\System32\QnnHtp.dll",
+        r"C:\Windows\System32\DriverStore\FileRepository\QnnHtp.dll",
+    ];
+    if !candidates.iter().any(|p| std::path::Path::new(p).exists()) {
+        return None;
+    }
+
+    Some(NpuInfo {
+        vendor: NpuVendor::Qualcomm,
+        tops: 45.0,
+        max_precision: Precision::INT8,
+        description: "Qualcomm Hexagon NPU (QNN HTP backend detected)".to_string(),
     })
 }

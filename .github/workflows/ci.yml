@@ -28,20 +28,26 @@ jobs:
       - run: cargo clippy --features intel --all-targets -- -D warnings
       - run: cargo clippy --features qualcomm --all-targets -- -D warnings
 
-  # Every feature must at least compile on Linux. The `intel` feature uses
-  # openvino runtime-linking, so it builds without the OpenVINO runtime present.
-  check-linux:
-    name: check (${{ matrix.feature }})
-    runs-on: ubuntu-latest
+  # Every feature must at least compile on both non-Apple platforms. The
+  # `intel` feature uses openvino runtime-linking and `qualcomm` opens the QNN
+  # backend at runtime, so neither needs its vendor runtime installed here.
+  #
+  # Windows matters specifically because detect.rs has Windows-only probes for
+  # both the QNN HTP DLL and the OpenVINO DLL that no other job compiles.
+  check:
+    name: check (${{ matrix.feature }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         feature: [default, intel, qualcomm]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: cargo check
+        shell: bash
         run: |
           if [ "${{ matrix.feature }}" = "default" ]; then
             cargo check --all-targets

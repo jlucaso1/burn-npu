@@ -1,6 +1,7 @@
 # burn-npu
 
-> **Early development.** Apple backend tested and working. Intel and Qualcomm implemented but need hardware validation. Contributions welcome.
+> **Early development.** Apple backend tested and working. Intel and Qualcomm are
+> implemented but have never been run on their target hardware. Contributions welcome.
 
 NPU backend for [Burn](https://burn.dev). Drop-in replacement for `burn-wgpu` or `burn-flex` that runs inference on hardware Neural Processing Units.
 
@@ -59,8 +60,8 @@ burn-npu = { version = "0.3", features = ["apple"] }
 | Feature | Hardware | Status | Requires |
 |---|---|---|---|
 | `apple` | Apple Neural Engine (M1/M2/M3/M4) | **tested, working** | macOS 15+, Xcode |
-| `intel` | Intel Core Ultra NPU | implemented, needs hardware validation | OpenVINO runtime |
-| `qualcomm` | Qualcomm Hexagon (Snapdragon) | implemented, needs hardware + QNN SDK | QNN SDK |
+| `intel` | Intel Core Ultra NPU | implemented, **never run on hardware** | OpenVINO runtime |
+| `qualcomm` | Qualcomm Hexagon (Snapdragon) | implemented, **never run on hardware** | QAIRT/QNN SDK at build time (`QNN_SDK_ROOT`) |
 
 Enable one feature at a time. Without any feature, falls back to burn-flex (CPU).
 
@@ -72,7 +73,7 @@ Each platform has a native tensor type that stays on the NPU between operations.
 |---|---|---|
 | Apple | MLTensor handle | ANE / GPU / CPU via Core ML |
 | Intel | OpenVINO tensor | NPU / GPU / CPU via OpenVINO |
-| Qualcomm | QNN tensor (planned) | CPU fallback until QNN SDK integrated |
+| Qualcomm | QNN graph on Hexagon (HTP) | matmul on NPU, everything else CPU |
 
 On Apple, 37 float ops run natively on the NPU. On Intel, matmul is NPU-accelerated via OpenVINO. Remaining ops and int/bool tensors delegate to burn-flex.
 
@@ -85,7 +86,11 @@ This project was motivated by [this discussion](https://github.com/tracel-ai/bur
 This is an early project. Help is welcome:
 
 - **Intel hardware testing** — run `cargo test --features intel` on a Core Ultra machine and open an issue with results
-- **Qualcomm hardware testing** — if you have a Snapdragon X Elite device or Rubik Pi 3, help integrate the QNN SDK
+- **Qualcomm hardware testing** — the QNN integration is written but has never
+  been compiled against real SDK headers or run on a device. If you have a
+  Snapdragon X Elite or Rubik Pi 3, building with `QNN_SDK_ROOT` set is the
+  single most useful thing you could contribute. See the notes in
+  `src/backends/qualcomm/qnn.rs` for what is most likely to need fixing first.
 - **More NPU-accelerated ops** — move remaining float ops from burn-flex delegation to native NPU execution on Intel/Qualcomm
 - **Bug reports** — if a Burn model doesn't work on `NpuBurnBackend`, open an issue
 

@@ -1307,10 +1307,10 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
                 .unwrap_or_else(|_| crate::backends::intel::cpu_matmul(&lhs, &rhs))
         }
 
-        // Qualcomm: CPU matmul (TODO: QNN HTP dispatch)
+        // Qualcomm: Hexagon NPU via QNN when available, else CPU.
         #[cfg(all(feature = "qualcomm", not(feature = "intel")))]
         {
-            crate::backends::qualcomm::cpu_matmul(&lhs, &rhs)
+            crate::backends::qualcomm::matmul(&lhs, &rhs)
         }
     }
 

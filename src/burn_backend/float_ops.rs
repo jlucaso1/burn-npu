@@ -14,6 +14,8 @@ use super::{nd_dev, Nd, NpuBurnBackend, NpuBurnDevice};
 // ===========================================================================
 #[cfg(feature = "apple")]
 use super::ffi::*;
+#[cfg(feature = "apple")]
+use burn_ndarray::NdArrayTensor;
 
 #[cfg(feature = "apple")]
 impl FloatTensorOps<Self> for NpuBurnBackend {

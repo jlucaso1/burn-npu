@@ -67,11 +67,11 @@ impl burn_tensor::TensorMetadata for NpuFloatTensor {
 }
 
 // ---------------------------------------------------------------------------
-// NpuFloatTensor — IntelFloatTensor wrapper (intel feature)
+// NpuFloatTensor — shared Flex storage with OpenVINO matmul (intel feature)
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "intel")]
-pub type NpuFloatTensor = crate::backends::intel::IntelFloatTensor;
+pub type NpuFloatTensor = FlexTensor;
 
 // ---------------------------------------------------------------------------
 // NpuFloatTensor — QnnFloatTensor wrapper (qualcomm feature)
@@ -86,12 +86,12 @@ pub type NpuFloatTensor = crate::backends::qualcomm::QnnFloatTensor;
 
 #[cfg(feature = "intel")]
 pub(super) fn npu_to_ndarray(tensor: &NpuFloatTensor) -> FlexTensor {
-    crate::backends::intel::intel_to_ndarray(tensor)
+    tensor.clone()
 }
 
 #[cfg(feature = "intel")]
 pub(super) fn ndarray_to_npu(tensor: &FlexTensor) -> NpuFloatTensor {
-    crate::backends::intel::ndarray_to_intel(tensor)
+    tensor.clone()
 }
 
 // ===========================================================================
@@ -224,11 +224,8 @@ pub(super) fn int_handle_to_ndarray(handle: i32) -> FlexTensor {
 
 /// Upload a CPU bool mask to the NPU as a 0.0/1.0 float tensor.
 ///
-/// The on-device `npu_mask_fill`/`npu_mask_where` ops threshold their mask at
-/// 0.5, so a float mask is what they expect. Uploading the mask is much
-/// cheaper than the alternative of materialising the float tensor: it moves
-/// half as much data, and crucially it does not force the lazy MLTensor graph
-/// for the value tensor to be evaluated.
+/// Uploading the mask is cheaper than materialising the value tensor: it moves
+/// less data and does not force the lazy MLTensor graph to be evaluated.
 #[cfg(feature = "apple")]
 pub(super) fn bool_mask_to_npu(mask: FlexTensor) -> NpuFloatTensor {
     let shape: Vec<i32> = TensorMetadata::shape(&mask)

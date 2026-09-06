@@ -2,8 +2,8 @@
 
 > **Early development.** The Apple backend is tested and working, but does not
 > appear to reach the Neural Engine —
-> [see the evidence](#does-this-actually-use-the-neural-engine). Intel and
-> Qualcomm are implemented but have never been run on their target hardware.
+> [see the evidence](#does-this-actually-use-the-neural-engine). Intel has been
+> tested on an Intel NPU. Qualcomm has not been run on its target hardware.
 > Contributions welcome.
 
 NPU backend for [Burn](https://burn.dev). A drop-in replacement for `burn-wgpu` or `burn-flex` that targets hardware Neural Processing Units through each vendor's own API.
@@ -20,7 +20,7 @@ let b = Tensor::<B, 2>::from_floats([[5.0, 6.0], [7.0, 8.0]], &device);
 let c = a.matmul(b);
 ```
 
-Any Burn model works. No code changes needed. Just change the backend type.
+Supported inference models keep the standard Burn tensor/module interface when changing the backend type. See the platform notes for accelerated operations and CPU fallback.
 
 ## What NPUs can and can't do
 
@@ -66,22 +66,26 @@ burn-npu = { version = "0.4", features = ["apple"] }
 | Feature | Hardware | Status | Requires |
 |---|---|---|---|
 | `apple` | Apple Silicon (M1-M6) via MLTensor | **tested, working** -- but see the [Neural Engine caveat](#does-this-actually-use-the-neural-engine) | macOS 15+, Xcode |
-| `intel` | Intel Core Ultra NPU | implemented, **never run on hardware** | OpenVINO runtime |
+| `intel` | Intel Core Ultra NPU | **tested on Intel NPU** | OpenVINO runtime |
 | `qualcomm` | Qualcomm Hexagon (Snapdragon) | implemented, **never run on hardware** | QAIRT/QNN SDK at build time (`QNN_SDK_ROOT`) |
 
 Enable one feature at a time. Without any feature, falls back to burn-flex (CPU).
 
+Intel environment variables: `BURN_NPU_TRACE=1` logs NPU/GPU/CPU dispatch,
+`BURN_NPU_DISABLE=1` forces CPU fallback, `BURN_NPU_CONSTANT_WEIGHTS=1` compiles
+stable FP32 weights into NPU models for repeated inference.
+
 ## How It Works
 
-Each platform has a native tensor type that stays on the NPU between operations. No data copies between ops — only `into_data()` reads back to CPU.
+Storage and dispatch differ by platform. Intel uses shared host storage for Burn tensors, with copies at the OpenVINO boundary. Compiled models and inference requests are reused; the optional constant-weight path embeds reusable weights in compiled models.
 
 | Platform | Tensor type | Dispatch |
 |---|---|---|
 | Apple | MLTensor handle | GPU / CPU via Core ML (**not** the ANE -- see below) |
-| Intel | OpenVINO tensor | NPU / GPU / CPU via OpenVINO |
+| Intel | Shared burn-flex storage and views | FP32 matmul via OpenVINO NPU / GPU / CPU; supported attention graphs on NPU |
 | Qualcomm | QNN graph on Hexagon (HTP) | matmul on NPU, everything else CPU |
 
-On Apple, 37 float ops run natively in MLTensor rather than round-tripping to the CPU delegate. On Intel, matmul is NPU-accelerated via OpenVINO. Remaining ops and int/bool tensors delegate to burn-flex.
+On Apple, 37 float ops run natively in MLTensor rather than round-tripping to the CPU delegate. On Intel, FP32 matmul and supported attention graphs run on the NPU via OpenVINO; everything else delegates to burn-flex.
 
 ## Does this actually use the Neural Engine?
 
@@ -125,8 +129,7 @@ at a time. That is what burn 0.22's graph-capture backend, or Apple's newer
 Core AI framework, would make possible. It is the main open item for this
 project -- see [Contributing](#contributing).
 
-The Intel path is unaffected by any of this: OpenVINO targets the NPU device
-explicitly. It has simply never been run on Intel hardware.
+The Intel path targets OpenVINO devices explicitly and has been confirmed on NPU hardware.
 
 ## Background
 

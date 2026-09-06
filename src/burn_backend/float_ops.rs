@@ -7,7 +7,7 @@ use burn_tensor::{
     BoolDType, Distribution, FloatDType, IntDType, Scalar, Shape, Slice, TensorData,
 };
 
-#[cfg(any(feature = "apple", feature = "intel", feature = "qualcomm"))]
+#[cfg(any(feature = "apple", feature = "qualcomm"))]
 use super::tensor::*;
 use super::{flex_dev, Fx, NpuBurnBackend, NpuBurnDevice};
 
@@ -369,10 +369,8 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
 
     // ── Mask ────────────────────────────────────────────────────────────
 
-    // Masking stays on the NPU. Uploading the mask keeps the value tensor's
-    // MLTensor graph lazy; round-tripping it through the CPU would force the
-    // whole pending computation to materialise, which on an attention mask is
-    // the hot path.
+    // Masking stays on the NPU; uploading the mask keeps the value tensor's
+    // lazy MLTensor graph from materialising.
     fn float_mask_where(
         tensor: FloatTensor<Self>,
         mask: BoolTensor<Self>,
@@ -860,9 +858,9 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
 }
 
 // ===========================================================================
-// FloatTensorOps — no feature: full Flex delegation
+// FloatTensorOps — shared Flex storage; Intel dispatches FP32 matmul to OpenVINO
 // ===========================================================================
-#[cfg(not(any(feature = "apple", feature = "intel", feature = "qualcomm")))]
+#[cfg(not(any(feature = "apple", feature = "qualcomm")))]
 impl FloatTensorOps<Self> for NpuBurnBackend {
     fn float_from_data(data: TensorData, _device: &NpuBurnDevice) -> FloatTensor<Self> {
         <Fx as FloatTensorOps<Fx>>::float_from_data(data, &flex_dev())
@@ -910,6 +908,22 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
     }
 
     fn float_matmul(lhs: FloatTensor<Self>, rhs: FloatTensor<Self>) -> FloatTensor<Self> {
+        #[cfg(feature = "intel")]
+        {
+            if let Ok(output) = crate::backends::intel::openvino_matmul_flex(&lhs, &rhs) {
+                return output;
+            }
+            crate::backends::intel::diagnostics::fallback();
+            if std::env::var_os("BURN_NPU_TRACE").is_some() {
+                use burn_tensor::TensorMetadata;
+                eprintln!(
+                    "OpenVINO unavailable for {:?} x {:?} ({:?}); Flex CPU fallback",
+                    lhs.shape(),
+                    rhs.shape(),
+                    lhs.dtype()
+                );
+            }
+        }
         <Fx as FloatTensorOps<Fx>>::float_matmul(lhs, rhs)
     }
     fn float_cross(
@@ -1265,9 +1279,9 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
 }
 
 // ===========================================================================
-// FloatTensorOps — intel/qualcomm: Vec<f32> tensor, Flex delegation
+// FloatTensorOps — qualcomm: Vec<f32> tensor, Flex delegation
 // ===========================================================================
-#[cfg(any(feature = "intel", feature = "qualcomm"))]
+#[cfg(feature = "qualcomm")]
 impl FloatTensorOps<Self> for NpuBurnBackend {
     fn float_from_data(data: TensorData, _device: &NpuBurnDevice) -> FloatTensor<Self> {
         let floats: Vec<f32> = data.to_vec().unwrap();
@@ -1323,19 +1337,7 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
     // ── Matmul ──────────────────────────────────────────────────────────
 
     fn float_matmul(lhs: FloatTensor<Self>, rhs: FloatTensor<Self>) -> FloatTensor<Self> {
-        // Intel: try OpenVINO NPU for large matmuls, else CPU.
-        // Takes precedence if both features are somehow enabled at once.
-        #[cfg(feature = "intel")]
-        {
-            crate::backends::intel::openvino_matmul(&lhs, &rhs)
-                .unwrap_or_else(|_| crate::backends::intel::cpu_matmul(&lhs, &rhs))
-        }
-
-        // Qualcomm: Hexagon NPU via QNN when available, else CPU.
-        #[cfg(all(feature = "qualcomm", not(feature = "intel")))]
-        {
-            crate::backends::qualcomm::matmul(&lhs, &rhs)
-        }
+        crate::backends::qualcomm::matmul(&lhs, &rhs)
     }
 
     fn float_cross(

@@ -5,9 +5,9 @@
 //! - **`apple`**: `NpuFloatTensor` wraps an `i32` MLTensor handle. All float ops
 //!   pass handles through FFI; no data leaves the NPU between ops. Both f32 and
 //!   f16 are supported, f16 being the ANE's native format.
-//! - **`intel`**: `NpuFloatTensor` is `IntelFloatTensor` (`Vec<f32>` + shape).
-//!   Matmul attempts OpenVINO NPU dispatch; all other ops run on CPU or delegate
-//!   to burn-flex.
+//! - **`intel`**: `NpuFloatTensor` uses shared `FlexTensor` storage and views.
+//!   FP32 matmul attempts OpenVINO NPU dispatch; remaining ops and dtypes use
+//!   burn-flex without copying storage at every delegation.
 //! - **`qualcomm`**: `NpuFloatTensor` is `QnnFloatTensor` (`Vec<f32>` + shape).
 //!   Matmul dispatches to the Hexagon NPU when a QNN SDK was present at build
 //!   time; everything else runs on CPU.
@@ -51,7 +51,7 @@ pub(super) type Fx = Flex;
 /// Device type for the NPU burn backend. There is only one logical device.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum NpuBurnDevice {
-    /// The default device (routes to ANE when available, falls back to CPU).
+    /// The platform backend, with CPU fallback for unavailable acceleration.
     #[default]
     Default,
 }
@@ -156,12 +156,8 @@ impl Backend for NpuBurnBackend {
     /// Report what this backend can actually do, not what the CPU delegate can.
     ///
     /// On the apple path float tensors live in MLTensor, which supports f32 and
-    /// f16 but not bf16 or f64. Previously this delegated wholesale to
-    /// burn-flex, so burn was told bf16 and f64 were available and every such
-    /// tensor was silently handled as f32 instead.
-    ///
-    /// Int, bool and quantized dtypes still delegate, because those primitives
-    /// really are burn-flex tensors.
+    /// f16 but not bf16 or f64. Int, bool and quantized dtypes still delegate,
+    /// because those primitives really are burn-flex tensors.
     fn dtype_usage(_device: &Self::Device, dtype: DType) -> DTypeUsageSet {
         #[cfg(feature = "apple")]
         {

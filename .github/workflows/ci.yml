@@ -28,6 +28,27 @@ jobs:
       - run: cargo clippy --features intel --all-targets -- -D warnings
       - run: cargo clippy --features qualcomm --all-targets -- -D warnings
 
+  test-cpu-intel:
+    name: CPU and Intel fallback tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
+      # No vendor runtime is installed on this runner. Hardware-only tests stay ignored.
+      - run: cargo test --features intel
+      - run: BURN_NPU_DISABLE=1 cargo test --features intel
+
+  msrv:
+    name: MSRV (1.92)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --features intel --all-targets
+
   # Every feature must at least compile on both non-Apple platforms. The
   # `intel` feature uses openvino runtime-linking and `qualcomm` opens the QNN
   # backend at runtime, so neither needs its vendor runtime installed here.

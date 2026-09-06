@@ -764,9 +764,26 @@ impl ModuleOps<Self> for NpuBurnBackend {
         attn_bias: Option<FloatTensor<Self>>,
         options: AttentionModuleOptions,
     ) -> FloatTensor<Self> {
-        // No fused-attention primitive on the vendor APIs yet; round-trip
-        // through the CPU delegate. This is a prime candidate for native
-        // dispatch once the backend builds graphs instead of single ops.
+        #[cfg(feature = "intel")]
+        {
+            if let Ok(output) = crate::backends::intel::openvino_attention_masked(
+                &query,
+                &key,
+                &value,
+                attn_bias.as_ref(),
+                mask.as_ref(),
+                &options,
+            ) {
+                return output;
+            }
+            if std::env::var_os("BURN_NPU_TRACE").is_some() {
+                eprintln!("OpenVINO attention unavailable; Flex CPU fallback");
+            }
+        }
+        #[cfg(feature = "intel")]
+        crate::backends::intel::diagnostics::fallback();
+        // Preserve the CPU delegate's semantics for unsupported options and
+        // dtypes. Intel shares this storage; Qualcomm converts its tensors.
         let q = npu_to_ndarray(&query);
         let k = npu_to_ndarray(&key);
         let v = npu_to_ndarray(&value);

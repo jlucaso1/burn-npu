@@ -4,6 +4,13 @@ All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html); while below 1.0, a
 breaking change bumps the minor version.
 
+## Unreleased
+
+- Intel: shared Flex tensor storage with CPU dtype semantics; FP32 matmul and supported attention graphs run on the NPU via OpenVINO, with Flex fallback otherwise.
+- Intel: bounded LRU caches with shared in-flight builds, failure backoff/quarantine, dispatch diagnostics and FP16-range guards.
+- Compatibility: Intel's float primitive is now `FlexTensor`; the legacy Vec-based `IntelFloatTensor` remains for low-level use.
+- Tests: NPU hardware tests plus runtime-disabled CI coverage. MSRV is now 1.92, matching Burn 0.21.
+
 ## [0.4.0] - 2026-08-31
 
 Catches the project up to burn 0.21, implements the Qualcomm backend that was

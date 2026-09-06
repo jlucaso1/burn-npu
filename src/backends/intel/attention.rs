@@ -105,6 +105,9 @@ pub(super) fn execute(
         return Err(OpenVinoUnavailable);
     }
     super::range::safe_attention(q, k, v, &bias_contiguous, scale)?;
+    // Validation above runs without the runtime so rejections are testable
+    // everywhere; only compilation and inference need it.
+    super::ensure_openvino_loaded()?;
     // Materialize outside the entry lock: same-shape callers serialize on it.
     let inputs: Vec<FlexTensor> = [q, k, v, bias].iter().map(|t| t.to_contiguous()).collect();
     let mut key = [0usize; 17];

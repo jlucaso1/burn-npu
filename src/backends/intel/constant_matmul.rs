@@ -220,3 +220,32 @@ fn compile(rhs: &FlexTensor, m: usize, k: usize, n: usize) -> Result<Entry, Open
         _weight_blob: weights,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use burn_tensor::TensorData;
+
+    fn tensor(shape: Vec<usize>) -> FlexTensor {
+        let len: usize = shape.iter().product();
+        FlexTensor::from_data(TensorData::new(vec![0.5; len], shape))
+    }
+
+    #[test]
+    fn gates_reject_without_native_work() {
+        let lhs = tensor(vec![8, 300]);
+        // Rank, contiguity, offset, batch, minimum sizes, k agreement.
+        for rhs in [
+            tensor(vec![300]),
+            tensor(vec![300, 300]).transpose(0, 1),
+            tensor(vec![2, 600, 300]).narrow(1, 1, 300),
+            tensor(vec![2, 300, 300]),
+            tensor(vec![100, 200]),
+            tensor(vec![300, 100]),
+            tensor(vec![200, 300]),
+        ] {
+            assert!(matmul(&lhs, &rhs).is_err());
+        }
+        assert!(matmul(&tensor(vec![8]), &tensor(vec![300, 300])).is_err());
+    }
+}

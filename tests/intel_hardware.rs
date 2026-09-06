@@ -277,6 +277,7 @@ fn attention_options_and_fully_masked_rows_keep_fallback_semantics() {
     let k = q.clone();
     let v = FlexTensor::filled_typed([1, 1, 16, 32].into(), DType::F32, 0.25_f32);
     let bias = FlexTensor::filled_typed([1, 1, 16, 16].into(), DType::F32, f32::NEG_INFINITY);
+    let before = burn_npu::backends::intel::execution_stats();
     for (mask, bias, options) in [
         (None, Some(bias), AttentionModuleOptions::default()),
         (
@@ -315,6 +316,9 @@ fn attention_options_and_fully_masked_rows_keep_fallback_semantics() {
                 .unwrap();
         assert_eq!(actual, expected);
     }
+    // Cases 1-2 fall back; case 3 (nothing hidden) may use the NPU when present.
+    let after = burn_npu::backends::intel::execution_stats();
+    assert!(after.flex_fallbacks > before.flex_fallbacks);
 }
 
 #[test]
@@ -352,6 +356,64 @@ fn invalid_low_level_shapes_are_rejected_without_runtime_work() {
         shape: vec![32, 64],
     };
     assert!(openvino_matmul(&invalid, &rhs).is_err());
+    // Too small for OpenVINO dispatch, and mismatched non-broadcast batches.
+    let tiny = IntelFloatTensor::new(vec![1.; 4], vec![2, 2]);
+    assert!(openvino_matmul(&tiny, &tiny).is_err());
+    let lhs = IntelFloatTensor::new(vec![1.; 2 * 16], vec![2, 1, 4, 4]);
+    let rhs = IntelFloatTensor::new(vec![1.; 3 * 16], vec![3, 1, 4, 4]);
+    assert!(openvino_matmul(&lhs, &rhs).is_err());
+    // Nonfinite inputs never reach the runtime.
+    let mut nan = IntelFloatTensor::new(vec![0.125; 32 * 64], vec![32, 64]);
+    nan.data[7] = f32::NAN;
+    let rhs = IntelFloatTensor::new(vec![0.125; 64 * 32], vec![64, 32]);
+    assert!(openvino_matmul(&nan, &rhs).is_err());
+    // Non-FP32 tensors stay in Flex.
+    let f32t = burn_flex::FlexTensor::from_data(burn_tensor::TensorData::new(
+        vec![1_f32; 64 * 64],
+        [64, 64],
+    ));
+    let i32t = burn_flex::FlexTensor::from_data(burn_tensor::TensorData::new(
+        vec![1i32; 64 * 64],
+        [64, 64],
+    ));
+    assert!(burn_npu::backends::intel::openvino_matmul_flex(&f32t, &i32t).is_err());
+}
+
+#[test]
+fn attention_rejections_do_not_need_the_runtime() {
+    use burn_flex::FlexTensor;
+    use burn_npu::backends::intel::openvino_attention;
+    use burn_tensor::{ops::AttentionModuleOptions, DType, TensorData};
+    let tensor = |shape: Vec<usize>| {
+        FlexTensor::from_data(TensorData::new(vec![0.1; shape.iter().product()], shape))
+    };
+    let (q, k, v) = (
+        tensor(vec![1, 1, 8, 16]),
+        tensor(vec![1, 1, 8, 16]),
+        tensor(vec![1, 1, 8, 16]),
+    );
+    let plain = AttentionModuleOptions::default();
+    // Softcap, wrong rank, non-FP32, causal query-longer-than-key, fully masked.
+    let softcap = AttentionModuleOptions {
+        scale: None,
+        softcap: Some(2.),
+        is_causal: false,
+    };
+    assert!(openvino_attention(&q, &k, &v, None, &softcap).is_err());
+    let flat = tensor(vec![128]);
+    assert!(openvino_attention(&flat, &k, &v, None, &plain).is_err());
+    let int = FlexTensor::from_data(TensorData::new(vec![1i32; 128], [1, 1, 8, 16]));
+    assert!(openvino_attention(&int, &k, &v, None, &plain).is_err());
+    let ql = tensor(vec![1, 1, 16, 16]);
+    let kl = tensor(vec![1, 1, 8, 16]);
+    let causal = AttentionModuleOptions {
+        scale: None,
+        softcap: None,
+        is_causal: true,
+    };
+    assert!(openvino_attention(&ql, &kl, &kl, None, &causal).is_err());
+    let masked = FlexTensor::filled_typed([1, 1, 8, 8].into(), DType::F32, f32::NEG_INFINITY);
+    assert!(openvino_attention(&q, &k, &v, Some(&masked), &plain).is_err());
 }
 
 #[test]
@@ -359,6 +421,7 @@ fn finite_large_matmul_keeps_cpu_semantics_if_npu_range_is_insufficient() {
     use burn::tensor::Tensor;
     use burn_npu::{NpuBurnBackend as B, NpuBurnDevice};
     let device = NpuBurnDevice::Default;
+    let before = burn_npu::backends::intel::execution_stats();
     let a = Tensor::<B, 2>::full([16, 64], 256., &device);
     let b = Tensor::<B, 2>::full([64, 16], 256., &device);
     assert!(a
@@ -368,6 +431,9 @@ fn finite_large_matmul_keeps_cpu_semantics_if_npu_range_is_insufficient() {
         .unwrap()
         .iter()
         .all(|&v| v == 4194304.));
+    let after = burn_npu::backends::intel::execution_stats();
+    assert_eq!(after.npu_calls, before.npu_calls);
+    assert!(after.flex_fallbacks > before.flex_fallbacks);
 }
 
 #[test]
@@ -523,6 +589,7 @@ fn attention_rejects_unrepresentable_operands_even_when_their_product_is_small()
     };
     for (query_value, key_value, scale) in [(1e8_f32, 1e-8_f32, None), (0.0001, 0.0001, Some(1e8))]
     {
+        let before = burn_npu::backends::intel::execution_stats();
         let q = FlexTensor::from_data(TensorData::new(vec![query_value; 16 * 32], [1, 1, 16, 32]));
         let k = FlexTensor::from_data(TensorData::new(
             (0..16 * 32)
@@ -557,5 +624,8 @@ fn attention_rejects_unrepresentable_operands_even_when_their_product_is_small()
             .to_vec::<f32>()
             .unwrap();
         assert_eq!(actual, expected);
+        let after = burn_npu::backends::intel::execution_stats();
+        assert_eq!(after.npu_calls, before.npu_calls);
+        assert!(after.flex_fallbacks > before.flex_fallbacks);
     }
 }

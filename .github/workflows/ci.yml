@@ -39,6 +39,8 @@ jobs:
       # No vendor runtime is installed on this runner. Hardware-only tests stay ignored.
       - run: cargo test --features intel
       - run: BURN_NPU_DISABLE=1 cargo test --features intel
+      # Checked arithmetic and release-only paths differ from debug.
+      - run: cargo test --release --features intel
 
   msrv:
     name: MSRV (1.92)

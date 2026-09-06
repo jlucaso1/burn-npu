@@ -70,6 +70,7 @@ pub fn cache_stats() -> IntelCacheStats {
 
 /// Release cached models without cancelling active calls. A later call rebuilds
 /// its model. Call after workers finish when reclaiming memory between models.
+/// Initializes native bindings even under `BURN_NPU_DISABLE=1`.
 pub fn clear_caches() -> Result<(), OpenVinoUnavailable> {
     // Runtime-linked C function tables are thread-local, including destructors.
     load_openvino()?;
@@ -111,7 +112,7 @@ impl CachedEntry for OvCompiledMatmul {
 }
 
 /// Load the OpenVINO shared library (required for runtime-linking feature).
-fn ensure_openvino_loaded() -> Result<(), OpenVinoUnavailable> {
+pub(super) fn ensure_openvino_loaded() -> Result<(), OpenVinoUnavailable> {
     if disabled() {
         return Err(OpenVinoUnavailable);
     }
@@ -542,7 +543,6 @@ pub fn openvino_attention(
     bias: Option<&burn_flex::FlexTensor>,
     options: &burn_tensor::ops::AttentionModuleOptions,
 ) -> Result<burn_flex::FlexTensor, OpenVinoUnavailable> {
-    ensure_openvino_loaded()?;
     attention::execute(query, key, value, bias, None, options)
 }
 
@@ -554,7 +554,6 @@ pub(crate) fn openvino_attention_masked(
     mask: Option<&burn_flex::FlexTensor>,
     options: &burn_tensor::ops::AttentionModuleOptions,
 ) -> Result<burn_flex::FlexTensor, OpenVinoUnavailable> {
-    ensure_openvino_loaded()?;
     attention::execute(query, key, value, bias, mask, options)
 }
 

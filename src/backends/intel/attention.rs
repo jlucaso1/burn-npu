@@ -86,7 +86,7 @@ pub(super) fn execute(
         || bias_contiguous
             .storage::<f32>()
             .chunks(row_len)
-            .any(|row| row.iter().all(|&v| v <= -65504.0))
+            .any(|row| row.iter().all(|&v| v <= -super::range::LIMIT as f32))
     {
         return Err(OpenVinoUnavailable);
     }
@@ -142,7 +142,7 @@ pub(super) fn execute(
             .map_err(|e| diagnostics::failure("OpenVINO attention I/O", e))?;
         // Burn's fallback has a NaN-safe softmax for fully masked rows. If the NPU
         // softmax cannot represent them, use that implementation instead.
-        if values.len() != out.iter().product::<usize>() || super::range::max_abs(values).is_err() {
+        if values.len() != super::elements(&out)? || super::range::max_abs(values).is_err() {
             return Err(OpenVinoUnavailable);
         }
         Ok(values.to_vec())

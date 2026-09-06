@@ -4,13 +4,13 @@
 //! Arc::make_mut/get_mut, which detach or reject storage with weak references.
 use super::OpenVinoUnavailable;
 use burn_flex::FlexTensor;
-use burn_tensor::Bytes;
+use burn_tensor::{Bytes, TensorMetadata};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, LazyLock, Mutex, Weak};
-const LIMIT: f64 = 65504.0 * 0.99;
+pub(super) const LIMIT: f64 = 65504.0 * 0.99;
 #[derive(Default)]
 struct Bounds {
-    entries: HashMap<usize, (Weak<Bytes>, f64)>,
+    entries: HashMap<usize, (Weak<Bytes>, Vec<usize>, f64)>,
     order: VecDeque<usize>,
 }
 static BOUNDS: LazyLock<Mutex<Bounds>> = LazyLock::new(|| Mutex::new(Bounds::default()));
@@ -29,19 +29,36 @@ pub(super) fn max_abs(data: &[f32]) -> Result<f64, OpenVinoUnavailable> {
     Ok(f32::from_bits(bits) as f64)
 }
 pub(super) fn rhs_max(tensor: &FlexTensor) -> Result<f64, OpenVinoUnavailable> {
-    if tensor.storage::<f32>().len() < 65536 {
-        return max_abs(tensor.storage::<f32>());
+    let storage = tensor.storage::<f32>();
+    if storage.len() < 65536 || !tensor.is_contiguous() || tensor.layout().start_offset() != 0 {
+        return max_abs(storage);
     }
+    // Only whole-buffer contiguous tensors are cached: views sharing one
+    // allocation must not alias each other's bounds. The entry keeps a Weak
+    // so mutation still detaches the buffer (Arc::make_mut clones on weak
+    // refs) and a dead Weak plus a shape check defeat allocator ABA reuse.
+    let shape = tensor.shape().to_vec();
     let data = tensor.data_arc();
     let id = Arc::as_ptr(&data) as usize;
-    let mut bounds = BOUNDS.lock().map_err(|_| OpenVinoUnavailable)?;
-    if let Some((_, max)) = bounds.entries.get(&id) {
-        let max = *max;
-        bounds.order.retain(|&key| key != id);
-        bounds.order.push_back(id);
+    let hit = {
+        let mut bounds = BOUNDS.lock().map_err(|_| OpenVinoUnavailable)?;
+        let hit = bounds
+            .entries
+            .get(&id)
+            .filter(|(weak, cached_shape, _)| {
+                *cached_shape == shape
+                    && weak.upgrade().is_some_and(|live| Arc::ptr_eq(&live, &data))
+            })
+            .map(|(_, _, max)| *max);
+        if hit.is_some() {
+            bounds.order.retain(|&key| key != id);
+            bounds.order.push_back(id);
+        }
+        hit
+    };
+    if let Some(max) = hit {
         return Ok(max);
     }
-    drop(bounds);
     let max = max_abs(tensor.storage::<f32>())?;
     let mut bounds = BOUNDS.lock().map_err(|_| OpenVinoUnavailable)?;
     // Another caller may have populated this identity while we scanned it.
@@ -51,7 +68,9 @@ pub(super) fn rhs_max(tensor: &FlexTensor) -> Result<f64, OpenVinoUnavailable> {
             bounds.entries.remove(&old);
         }
     }
-    bounds.entries.insert(id, (Arc::downgrade(&data), max));
+    bounds
+        .entries
+        .insert(id, (Arc::downgrade(&data), shape, max));
     bounds.order.push_back(id);
     Ok(max)
 }
@@ -81,7 +100,7 @@ pub(super) fn safe_attention(
     let non_mask_bias = bias
         .storage::<f32>()
         .iter()
-        .filter(|&&x| x > -65504.0)
+        .filter(|&&x| x > -LIMIT as f32)
         .fold(0_f32, |m, x| m.max(x.abs())) as f64;
     if bound > LIMIT
         || bound * (scale as f64).abs() + non_mask_bias > 16000.0

@@ -111,7 +111,7 @@ impl<K: Eq + Hash + Clone, V> BuildCache<K, V> {
         };
         state.stats.entries = state.entries.len();
         drop(state);
-        drop(retired);
+        drop_retired(retired);
         let (result, _) = slot.value.get_or_init(|| {
             let result = build().map(Arc::new);
             if result.is_err() {
@@ -142,7 +142,7 @@ impl<K: Eq + Hash + Clone, V> BuildCache<K, V> {
         });
         let retired = state.entries.insert(key.clone(), replacement);
         drop(state);
-        drop(retired);
+        drop_retired(retired);
     }
     pub(super) fn stats(&self) -> CacheStats {
         self.state.lock().unwrap_or_else(|e| e.into_inner()).stats
@@ -155,8 +155,22 @@ impl<K: Eq + Hash + Clone, V> BuildCache<K, V> {
         state.stats.estimated_bytes = 0;
         drop(state);
         self.state.clear_poison();
-        drop(retired);
+        drop_retired(retired.into_values());
     }
+}
+
+/// Drop retired entries with the native runtime loaded on this thread.
+///
+/// Native destructors run against thread-local runtime tables, which a fresh
+/// worker may never have loaded. If loading fails, leak rather than run
+/// destructors without the runtime.
+fn drop_retired<V>(retired: impl IntoIterator<Item = Arc<Entry<V>>>) {
+    let mut retired = retired.into_iter().peekable();
+    if retired.peek().is_some() && super::load_openvino().is_err() {
+        retired.for_each(std::mem::forget);
+        return;
+    }
+    drop(retired);
 }
 
 #[cfg(test)]

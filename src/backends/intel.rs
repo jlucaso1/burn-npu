@@ -106,7 +106,7 @@ fn ensure_openvino_loaded() -> Result<(), OpenVinoUnavailable> {
     load_openvino()
 }
 
-fn load_openvino() -> Result<(), OpenVinoUnavailable> {
+pub(super) fn load_openvino() -> Result<(), OpenVinoUnavailable> {
     thread_local! { static READY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
     static FAILED: Mutex<Option<std::time::Instant>> = Mutex::new(None);
     if READY.get() {
@@ -287,20 +287,26 @@ fn openvino_matmul_slices(
         return Err(OpenVinoUnavailable);
     }
 
-    let lhs_stride = m * k;
-    let rhs_stride = k * n;
+    let lhs_stride = m.checked_mul(k).ok_or(OpenVinoUnavailable)?;
+    let rhs_stride = k.checked_mul(n).ok_or(OpenVinoUnavailable)?;
     let out_stride = m.checked_mul(n).ok_or(OpenVinoUnavailable)?;
+    let batch_lhs = batch_size
+        .checked_mul(lhs_stride)
+        .ok_or(OpenVinoUnavailable)?;
+    let batch_rhs = batch_size
+        .checked_mul(rhs_stride)
+        .ok_or(OpenVinoUnavailable)?;
+    let batch_out = batch_size
+        .checked_mul(out_stride)
+        .ok_or(OpenVinoUnavailable)?;
 
     // Cache hits also execute native functions on this calling thread.
     ensure_openvino_loaded()?;
     let cache_key = (batch_size, m, k, n, npu_only);
-    let out_len = batch_size
-        .checked_mul(out_stride)
-        .ok_or(OpenVinoUnavailable)?;
     let charge = lhs_data
         .len()
         .checked_add(rhs_data.len())
-        .and_then(|v| v.checked_add(out_len))
+        .and_then(|v| v.checked_add(batch_out))
         .and_then(|v| v.checked_mul(4))
         .ok_or(OpenVinoUnavailable)?;
     let cached = OV_CACHE.get_or_try_init(cache_key, charge, || {
@@ -315,7 +321,7 @@ fn openvino_matmul_slices(
             .lhs
             .get_data_mut::<f32>()
             .map_err(|e| diagnostics::failure("OpenVINO matmul I/O", e))?;
-        if lt_buf.len() != batch_size * lhs_stride || lt_buf.len() != lhs_data.len() {
+        if lt_buf.len() != batch_lhs || lt_buf.len() != lhs_data.len() {
             return Err(OpenVinoUnavailable);
         }
         lt_buf.copy_from_slice(lhs_data);
@@ -323,7 +329,7 @@ fn openvino_matmul_slices(
             .rhs
             .get_data_mut::<f32>()
             .map_err(|e| diagnostics::failure("OpenVINO matmul I/O", e))?;
-        if rt_buf.len() != batch_size * rhs_stride || rt_buf.len() != rhs_data.len() {
+        if rt_buf.len() != batch_rhs || rt_buf.len() != rhs_data.len() {
             return Err(OpenVinoUnavailable);
         }
         rt_buf.copy_from_slice(rhs_data);
@@ -339,7 +345,7 @@ fn openvino_matmul_slices(
         let out_buf = output
             .get_data::<f32>()
             .map_err(|e| diagnostics::failure("OpenVINO matmul I/O", e))?;
-        if out_buf.len() != batch_size * out_stride || range::max_abs(out_buf).is_err() {
+        if out_buf.len() != batch_out || range::max_abs(out_buf).is_err() {
             return Err(OpenVinoUnavailable);
         }
         // Copy while holding the lock: the request owns/reuses the output storage.

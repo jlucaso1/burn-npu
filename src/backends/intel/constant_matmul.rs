@@ -54,6 +54,9 @@ struct Entry {
     failed: bool,
     // Holds the exact allocation used by the key, not just a copied value.
     _weight: FlexTensor,
+    // Owns the blob handed to `read_model_from_buffer`, so the compiled
+    // model can never outlive it.
+    _weight_blob: openvino::Tensor,
 }
 
 pub(super) fn matmul(
@@ -126,7 +129,9 @@ pub(super) fn matmul(
         let data = output
             .get_data::<f32>()
             .map_err(|e| diagnostics::failure("OpenVINO constant matmul I/O", e))?;
-        if data.len() != m * n || super::range::max_abs(data).is_err() {
+        if data.len() != m.checked_mul(n).ok_or(OpenVinoUnavailable)?
+            || super::range::max_abs(data).is_err()
+        {
             return Err(OpenVinoUnavailable);
         }
         Ok(data.to_vec())
@@ -197,5 +202,6 @@ fn compile(rhs: &FlexTensor, m: usize, k: usize, n: usize) -> Result<Entry, Open
         _compiled: compiled,
         failed: false,
         _weight: rhs.clone(),
+        _weight_blob: weights,
     })
 }

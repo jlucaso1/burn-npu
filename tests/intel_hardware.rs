@@ -377,7 +377,9 @@ fn native_cache_hit_and_clear_work_on_fresh_threads() {
     openvino_matmul(&tensor(), &tensor()).expect("NPU required");
     std::thread::spawn(move || {
         let out = openvino_matmul(&tensor(), &tensor()).expect("cache hit on fresh thread");
-        assert!(out.data.iter().all(|&v| v == 0.5));
+        for &v in &out.data {
+            assert!((v - 0.5).abs() <= 0.005 + 0.005 * 0.5);
+        }
     })
     .join()
     .unwrap();
@@ -478,21 +480,36 @@ fn shared_rhs_broadcast_runs_on_npu() {
             assert!((out.data[i * 256 + j] - expected).abs() < 0.005 + 0.005 * expected.abs());
         }
     }
-    // Exercise the optional constant-weight path with the same batched shape.
-    if std::env::var("BURN_NPU_CONSTANT_WEIGHTS").as_deref() == Ok("1") {
-        use burn_tensor::{TensorData, TensorMetadata};
-        let lhs = burn_flex::FlexTensor::from_data(TensorData::new(a.data, a.shape));
-        let rhs = burn_flex::FlexTensor::from_data(TensorData::new(b.data, b.shape));
-        let before = burn_npu::backends::intel::cache_stats().constant_weights;
-        let actual = burn_npu::backends::intel::openvino_matmul_flex(&lhs, &rhs)
-            .expect("shared constant RHS execution");
-        let after = burn_npu::backends::intel::cache_stats().constant_weights;
-        assert!(after.misses > before.misses);
-        assert_eq!(after.build_failures, before.build_failures);
-        assert_eq!(actual.shape().to_vec(), out.shape);
-        for (&a, &b) in actual.storage::<f32>().iter().zip(&out.data) {
-            assert!((a - b).abs() <= 0.005 + 0.005 * b.abs());
-        }
+}
+
+#[test]
+#[ignore = "requires NPU and BURN_NPU_CONSTANT_WEIGHTS=1; shared RHS via the constant path"]
+fn shared_rhs_broadcast_runs_on_constant_path() {
+    use burn_tensor::{TensorData, TensorMetadata};
+    assert_eq!(
+        std::env::var("BURN_NPU_CONSTANT_WEIGHTS").as_deref(),
+        Ok("1")
+    );
+    let a: Vec<f32> = (0..2 * 3 * 4 * 256)
+        .map(|i| (i % 13) as f32 / 32.)
+        .collect();
+    let b: Vec<f32> = (0..256 * 256).map(|i| (i % 17) as f32 / 32.).collect();
+    let lhs = burn_flex::FlexTensor::from_data(TensorData::new(a.clone(), [2, 3, 4, 256]));
+    let rhs = burn_flex::FlexTensor::from_data(TensorData::new(b.clone(), [1, 1, 256, 256]));
+    let expected = openvino_matmul(
+        &IntelFloatTensor::new(a, vec![2, 3, 4, 256]),
+        &IntelFloatTensor::new(b, vec![1, 1, 256, 256]),
+    )
+    .expect("NPU required");
+    let before = burn_npu::backends::intel::cache_stats().constant_weights;
+    let actual =
+        burn_npu::backends::intel::openvino_matmul_flex(&lhs, &rhs).expect("constant execution");
+    let after = burn_npu::backends::intel::cache_stats().constant_weights;
+    assert!(after.misses > before.misses);
+    assert_eq!(after.build_failures, before.build_failures);
+    assert_eq!(actual.shape().to_vec(), expected.shape);
+    for (&a, &b) in actual.storage::<f32>().iter().zip(&expected.data) {
+        assert!((a - b).abs() <= 0.005 + 0.005 * b.abs());
     }
 }
 

@@ -173,6 +173,41 @@ fn drop_retired<V>(retired: impl IntoIterator<Item = Arc<Entry<V>>>) {
     drop(retired);
 }
 
+/// A cached native executor that can be quarantined after a failed call.
+pub(super) trait CachedEntry {
+    fn has_failed(&self) -> bool;
+    fn set_failed(&mut self);
+}
+
+/// Look up (or build), lock, run and quarantine-on-error in one place.
+///
+/// Callers supply only input filling and output reading; the lock discipline
+/// and failure protocol stay in lockstep across graphs.
+pub(super) fn run_cached<K, E>(
+    cache: &BuildCache<K, Mutex<E>>,
+    key: K,
+    charge: usize,
+    build: impl FnOnce() -> Result<E, OpenVinoUnavailable>,
+    run: impl FnOnce(&mut E) -> Result<Vec<f32>, OpenVinoUnavailable>,
+) -> Result<Vec<f32>, OpenVinoUnavailable>
+where
+    K: Eq + Hash + Clone,
+    E: CachedEntry,
+{
+    let cached = cache.get_or_try_init(key.clone(), charge, || build().map(Mutex::new))?;
+    let mut entry = cached.lock().map_err(|_| OpenVinoUnavailable)?;
+    if entry.has_failed() {
+        return Err(OpenVinoUnavailable);
+    }
+    let outcome = run(&mut entry);
+    if outcome.is_err() {
+        entry.set_failed();
+        drop(entry);
+        cache.mark_failed(&key, &cached);
+    }
+    outcome
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -24,6 +24,16 @@ struct Entry {
     failed: bool,
 }
 
+impl super::cache::CachedEntry for Entry {
+    fn has_failed(&self) -> bool {
+        self.failed
+    }
+
+    fn set_failed(&mut self) {
+        self.failed = true;
+    }
+}
+
 pub(super) fn execute(
     q: &FlexTensor,
     k: &FlexTensor,
@@ -111,54 +121,49 @@ pub(super) fn execute(
                 .ok_or(OpenVinoUnavailable)
         })?;
     let charge = count.checked_mul(4).ok_or(OpenVinoUnavailable)?;
-    let cached = CACHE.get_or_try_init(key, charge, || {
-        compile(
-            &[qs.to_vec(), ks.to_vec(), vs.to_vec(), bs.to_vec(), vec![1]],
-            &score,
-            &out,
-            scale,
-        )
-        .map(Mutex::new)
-    })?;
-    let mut entry = cached.lock().map_err(|_| OpenVinoUnavailable)?;
-    if entry.failed {
-        return Err(OpenVinoUnavailable);
-    }
-    let outcome = (|| {
-        for (i, contiguous) in inputs.iter().enumerate() {
-            let input = entry.inputs[i]
-                .get_data_mut::<f32>()
+    let outcome = super::cache::run_cached(
+        &CACHE,
+        key,
+        charge,
+        || {
+            compile(
+                &[qs.to_vec(), ks.to_vec(), vs.to_vec(), bs.to_vec(), vec![1]],
+                &score,
+                &out,
+                scale,
+            )
+        },
+        |entry| {
+            for (i, contiguous) in inputs.iter().enumerate() {
+                let input = entry.inputs[i]
+                    .get_data_mut::<f32>()
+                    .map_err(|e| diagnostics::failure("OpenVINO attention I/O", e))?;
+                if input.len() != contiguous.storage::<f32>().len() {
+                    return Err(OpenVinoUnavailable);
+                }
+                input.copy_from_slice(contiguous.storage::<f32>());
+            }
+            entry
+                .request
+                .infer()
+                .map_err(|e| diagnostics::failure("OpenVINO attention inference", e))?;
+            diagnostics::executed(Target::Npu);
+            let output = entry
+                .request
+                .get_output_tensor_by_index(0)
                 .map_err(|e| diagnostics::failure("OpenVINO attention I/O", e))?;
-            if input.len() != contiguous.storage::<f32>().len() {
+            let values = output
+                .get_data::<f32>()
+                .map_err(|e| diagnostics::failure("OpenVINO attention I/O", e))?;
+            // Burn's fallback has a NaN-safe softmax for fully masked rows. If the NPU
+            // softmax cannot represent them, use that implementation instead.
+            if values.len() != super::elements(&out)? || super::range::max_abs(values).is_err() {
                 return Err(OpenVinoUnavailable);
             }
-            input.copy_from_slice(contiguous.storage::<f32>());
-        }
-        entry
-            .request
-            .infer()
-            .map_err(|e| diagnostics::failure("OpenVINO attention inference", e))?;
-        diagnostics::executed(Target::Npu);
-        let output = entry
-            .request
-            .get_output_tensor_by_index(0)
-            .map_err(|e| diagnostics::failure("OpenVINO attention I/O", e))?;
-        let values = output
-            .get_data::<f32>()
-            .map_err(|e| diagnostics::failure("OpenVINO attention I/O", e))?;
-        // Burn's fallback has a NaN-safe softmax for fully masked rows. If the NPU
-        // softmax cannot represent them, use that implementation instead.
-        if values.len() != super::elements(&out)? || super::range::max_abs(values).is_err() {
-            return Err(OpenVinoUnavailable);
-        }
-        Ok(values.to_vec())
-    })();
-    if outcome.is_err() {
-        entry.failed = true;
-        drop(entry);
-        CACHE.mark_failed(&key, &cached);
-    }
-    Ok(FlexTensor::from_data(TensorData::new(outcome?, out)))
+            Ok(values.to_vec())
+        },
+    )?;
+    Ok(FlexTensor::from_data(TensorData::new(outcome, out)))
 }
 
 /// Materialize only the combined bias. A bounded score range makes -1e9 an
@@ -226,44 +231,13 @@ fn masked_bias(
     Ok(FlexTensor::from_data(TensorData::new(values, shape)))
 }
 
-fn dims(shape: &[usize]) -> String {
-    shape.iter().map(|d| format!("<dim>{d}</dim>")).collect()
-}
-fn layer(
-    id: usize,
-    name: &str,
-    kind: &str,
-    version: &str,
-    data: &str,
-    inputs: &[&[usize]],
-    out: Option<&[usize]>,
-) -> String {
-    let mut xml = format!(
-        r#"<layer id="{id}" name="{name}" type="{kind}" version="{version}"><data {data}/><input>"#
-    );
-    for (port, shape) in inputs.iter().enumerate() {
-        xml += &format!(
-            r#"<port id="{port}" precision="FP32">{}</port>"#,
-            dims(shape)
-        );
-    }
-    xml += "</input>";
-    if let Some(shape) = out {
-        xml += &format!(
-            r#"<output><port id="{}" precision="FP32" names="{name}">{}</port></output>"#,
-            inputs.len(),
-            dims(shape)
-        );
-    }
-    xml += "</layer>";
-    xml
-}
 fn compile(
     shapes: &[Vec<usize>],
     score: &[usize],
     out: &[usize],
     scale: f32,
 ) -> Result<Entry, OpenVinoUnavailable> {
+    use super::ir::layer;
     use openvino::{Core, DeviceType};
     let mut layers = String::new();
     for (i, shape) in shapes.iter().enumerate() {
@@ -341,23 +315,17 @@ fn compile(
         (2, 0, 9, 1),
         (9, 2, 10, 0),
     ] {
-        edges += &format!(
-            r#"<edge from-layer="{from}" from-port="{port}" to-layer="{to}" to-port="{input}"/>"#
-        );
+        edges += &super::ir::edge(from, port, to, input);
     }
-    let xml = format!(
-        r#"<?xml version="1.0"?><net name="attention" version="11"><layers>{layers}</layers><edges>{edges}</edges></net>"#
-    );
+    let xml = super::ir::net("attention", &layers, &edges);
     let mut core = Core::new().map_err(|_| OpenVinoUnavailable)?;
-    let model = core
-        .read_model_from_buffer(xml.as_bytes(), None)
-        .map_err(|_| OpenVinoUnavailable)?;
-    let mut compiled = core.compile_model(&model, DeviceType::NPU).map_err(|err| {
-        if super::trace() {
-            eprintln!("OpenVINO attention compilation unavailable: {err}");
-        }
-        diagnostics::failure("OpenVINO attention compilation", err)
-    })?;
+    let mut compiled = super::ir::compile_on_device(
+        &mut core,
+        &xml,
+        None,
+        DeviceType::NPU,
+        "OpenVINO attention compilation",
+    )?;
     let request = compiled
         .create_infer_request()
         .map_err(|_| OpenVinoUnavailable)?;

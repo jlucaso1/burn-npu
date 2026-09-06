@@ -17,6 +17,7 @@ use std::time::Duration;
 mod attention;
 mod cache;
 pub(crate) mod diagnostics;
+mod ir;
 mod range;
 pub use diagnostics::ExecutionStats;
 use diagnostics::Target;
@@ -28,6 +29,7 @@ pub fn execution_stats() -> ExecutionStats {
 mod constant_matmul;
 use cache::BuildCache;
 pub use cache::CacheStats;
+use cache::CachedEntry;
 
 /// OpenVINO acceleration was unavailable or conservatively declined.
 ///
@@ -96,6 +98,16 @@ struct OvCompiledMatmul {
     _compiled: openvino::CompiledModel,
     target: Target,
     failed: bool,
+}
+
+impl CachedEntry for OvCompiledMatmul {
+    fn has_failed(&self) -> bool {
+        self.failed
+    }
+
+    fn set_failed(&mut self) {
+        self.failed = true;
+    }
 }
 
 /// Load the OpenVINO shared library (required for runtime-linking feature).
@@ -307,63 +319,57 @@ fn openvino_matmul_slices(
         .and_then(|v| v.checked_add(batch_out))
         .and_then(|v| v.checked_mul(4))
         .ok_or(OpenVinoUnavailable)?;
-    let cached = OV_CACHE.get_or_try_init(cache_key, charge, || {
-        compile_matmul(
-            admitted.batch_size,
-            admitted.m,
-            admitted.k,
-            admitted.n,
-            npu_only,
-        )
-        .map(Mutex::new)
-    })?;
-    let mut entry = cached.lock().map_err(|_| OpenVinoUnavailable)?;
-    if entry.failed {
-        return Err(OpenVinoUnavailable);
-    }
-    let outcome = (|| {
-        let lt_buf = entry
-            .lhs
-            .get_data_mut::<f32>()
-            .map_err(|e| diagnostics::failure("OpenVINO matmul I/O", e))?;
-        if lt_buf.len() != batch_lhs || lt_buf.len() != lhs_data.len() {
-            return Err(OpenVinoUnavailable);
-        }
-        lt_buf.copy_from_slice(lhs_data);
-        let rt_buf = entry
-            .rhs
-            .get_data_mut::<f32>()
-            .map_err(|e| diagnostics::failure("OpenVINO matmul I/O", e))?;
-        if rt_buf.len() != batch_rhs || rt_buf.len() != rhs_data.len() {
-            return Err(OpenVinoUnavailable);
-        }
-        rt_buf.copy_from_slice(rhs_data);
-        entry
-            .request
-            .infer()
-            .map_err(|e| diagnostics::failure("OpenVINO matmul inference", e))?;
-        diagnostics::executed(entry.target);
-        let output = entry
-            .request
-            .get_output_tensor_by_index(0)
-            .map_err(|e| diagnostics::failure("OpenVINO matmul I/O", e))?;
-        let out_buf = output
-            .get_data::<f32>()
-            .map_err(|e| diagnostics::failure("OpenVINO matmul I/O", e))?;
-        if out_buf.len() != batch_out || range::max_abs(out_buf).is_err() {
-            return Err(OpenVinoUnavailable);
-        }
-        // Copy while holding the lock: the request owns/reuses the output storage.
-        Ok(out_buf.to_vec())
-    })();
-    if outcome.is_err() {
-        entry.failed = true;
-        drop(entry);
-        OV_CACHE.mark_failed(&cache_key, &cached);
-    }
-    let result_data = outcome?;
+    let data = cache::run_cached(
+        &OV_CACHE,
+        cache_key,
+        charge,
+        || {
+            compile_matmul(
+                admitted.batch_size,
+                admitted.m,
+                admitted.k,
+                admitted.n,
+                npu_only,
+            )
+        },
+        |entry| {
+            let lt_buf = entry
+                .lhs
+                .get_data_mut::<f32>()
+                .map_err(|e| diagnostics::failure("OpenVINO matmul I/O", e))?;
+            if lt_buf.len() != batch_lhs || lt_buf.len() != lhs_data.len() {
+                return Err(OpenVinoUnavailable);
+            }
+            lt_buf.copy_from_slice(lhs_data);
+            let rt_buf = entry
+                .rhs
+                .get_data_mut::<f32>()
+                .map_err(|e| diagnostics::failure("OpenVINO matmul I/O", e))?;
+            if rt_buf.len() != batch_rhs || rt_buf.len() != rhs_data.len() {
+                return Err(OpenVinoUnavailable);
+            }
+            rt_buf.copy_from_slice(rhs_data);
+            entry
+                .request
+                .infer()
+                .map_err(|e| diagnostics::failure("OpenVINO matmul inference", e))?;
+            diagnostics::executed(entry.target);
+            let output = entry
+                .request
+                .get_output_tensor_by_index(0)
+                .map_err(|e| diagnostics::failure("OpenVINO matmul I/O", e))?;
+            let out_buf = output
+                .get_data::<f32>()
+                .map_err(|e| diagnostics::failure("OpenVINO matmul I/O", e))?;
+            if out_buf.len() != batch_out || range::max_abs(out_buf).is_err() {
+                return Err(OpenVinoUnavailable);
+            }
+            // Copy while holding the lock: the request owns/reuses the output storage.
+            Ok(out_buf.to_vec())
+        },
+    )?;
 
-    Ok(IntelFloatTensor::new(result_data, admitted.out_shape))
+    Ok(IntelFloatTensor::new(data, admitted.out_shape))
 }
 
 /// Shape-only admission for matmul: rank, zero dims, length agreement,
@@ -439,56 +445,51 @@ fn compile_matmul(
     n: usize,
     npu_only: bool,
 ) -> Result<OvCompiledMatmul, OpenVinoUnavailable> {
+    use ir::{edge, layer, net};
     use openvino::{Core, DeviceType};
     // Flatten matching batch dimensions without changing their element order.
     // Keep single matrices 2D for compatibility with existing compiled kernels.
-    let prefix = if batch_size > 1 {
-        format!("{batch_size},")
+    let batch: Vec<usize> = if batch_size > 1 {
+        vec![batch_size]
     } else {
-        String::new()
+        Vec::new()
     };
-    let batch_dims = if batch_size > 1 {
-        format!("<dim>{batch_size}</dim>")
-    } else {
-        String::new()
-    };
-
-    let ir_xml = format!(
-        r#"<?xml version="1.0"?>
-<net name="matmul" version="11">
-  <layers>
-    <layer id="0" name="lhs" type="Parameter" version="opset1">
-      <data shape="{prefix}{m},{k}" element_type="f32"/>
-      <output><port id="0" precision="FP32" names="lhs">{batch_dims}<dim>{m}</dim><dim>{k}</dim></port></output>
-    </layer>
-    <layer id="1" name="rhs" type="Parameter" version="opset1">
-      <data shape="{prefix}{k},{n}" element_type="f32"/>
-      <output><port id="0" precision="FP32" names="rhs">{batch_dims}<dim>{k}</dim><dim>{n}</dim></port></output>
-    </layer>
-    <layer id="2" name="mm" type="MatMul" version="opset1">
-      <data transpose_a="false" transpose_b="false"/>
-      <input>
-<port id="0">{batch_dims}<dim>{m}</dim><dim>{k}</dim></port>
-<port id="1">{batch_dims}<dim>{k}</dim><dim>{n}</dim></port>
-      </input>
-      <output><port id="2" precision="FP32">{batch_dims}<dim>{m}</dim><dim>{n}</dim></port></output>
-    </layer>
-    <layer id="3" name="result" type="Result" version="opset1">
-      <input><port id="0">{batch_dims}<dim>{m}</dim><dim>{n}</dim></port></input>
-    </layer>
-  </layers>
-  <edges>
-    <edge from-layer="0" from-port="0" to-layer="2" to-port="0"/>
-    <edge from-layer="1" from-port="0" to-layer="2" to-port="1"/>
-    <edge from-layer="2" from-port="2" to-layer="3" to-port="0"/>
-  </edges>
-</net>"#
+    let lhs_shape: Vec<usize> = batch.iter().copied().chain([m, k]).collect();
+    let rhs_shape: Vec<usize> = batch.iter().copied().chain([k, n]).collect();
+    let out_shape: Vec<usize> = batch.iter().copied().chain([m, n]).collect();
+    let csv = |s: &[usize]| s.iter().map(usize::to_string).collect::<Vec<_>>().join(",");
+    let mut layers = layer(
+        0,
+        "lhs",
+        "Parameter",
+        "opset1",
+        &format!(r#"shape="{}" element_type="f32""#, csv(&lhs_shape)),
+        &[],
+        Some(&lhs_shape),
     );
+    layers += &layer(
+        1,
+        "rhs",
+        "Parameter",
+        "opset1",
+        &format!(r#"shape="{}" element_type="f32""#, csv(&rhs_shape)),
+        &[],
+        Some(&rhs_shape),
+    );
+    layers += &layer(
+        2,
+        "mm",
+        "MatMul",
+        "opset1",
+        r#"transpose_a="false" transpose_b="false""#,
+        &[&lhs_shape, &rhs_shape],
+        Some(&out_shape),
+    );
+    layers += &layer(3, "result", "Result", "opset1", "", &[&out_shape], None);
+    let edges = [edge(0, 0, 2, 0), edge(1, 0, 2, 1), edge(2, 2, 3, 0)].concat();
+    let ir_xml = net("matmul", &layers, &edges);
 
     let mut core = Core::new().map_err(|_| OpenVinoUnavailable)?;
-    let model = core
-        .read_model_from_buffer(ir_xml.as_bytes(), None)
-        .map_err(|_| OpenVinoUnavailable)?;
 
     let devices = [
         (DeviceType::NPU, Target::Npu),
@@ -500,19 +501,18 @@ fn compile_matmul(
         if npu_only && *target != Target::Npu {
             continue;
         }
-        match core.compile_model(&model, dev.to_owned()) {
-            Ok(c) => {
-                if trace() {
-                    eprintln!(
-                        "OpenVINO matmul batch={batch_size} {m}x{k}x{n}: compiled on {dev:?}"
-                    );
-                }
-                compiled = Some((c, *target));
-                break;
+        if let Ok(c) = ir::compile_on_device(
+            &mut core,
+            &ir_xml,
+            None,
+            dev.to_owned(),
+            &format!("OpenVINO {dev:?} matmul compilation"),
+        ) {
+            if trace() {
+                eprintln!("OpenVINO matmul batch={batch_size} {m}x{k}x{n}: compiled on {dev:?}");
             }
-            Err(err) => {
-                diagnostics::failure(&format!("OpenVINO {dev:?} matmul compilation"), err);
-            }
+            compiled = Some((c, *target));
+            break;
         }
     }
     let (mut compiled, target) = compiled.ok_or(OpenVinoUnavailable)?;

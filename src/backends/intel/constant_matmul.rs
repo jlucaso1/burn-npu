@@ -59,6 +59,16 @@ struct Entry {
     _weight_blob: openvino::Tensor,
 }
 
+impl super::cache::CachedEntry for Entry {
+    fn has_failed(&self) -> bool {
+        self.failed
+    }
+
+    fn set_failed(&mut self) {
+        self.failed = true;
+    }
+}
+
 pub(super) fn matmul(
     lhs: &FlexTensor,
     rhs: &FlexTensor,
@@ -100,48 +110,41 @@ pub(super) fn matmul(
         .and_then(|v| v.checked_mul(4))
         .and_then(|v| v.checked_add(weight_bytes))
         .ok_or(OpenVinoUnavailable)?;
-    let cached = CACHE.get_or_try_init(key.clone(), charge, || {
-        compile(rhs, m, k, n).map(Mutex::new)
-    })?;
     let lhs = lhs.to_contiguous();
-    let mut entry = cached.lock().map_err(|_| OpenVinoUnavailable)?;
-    if entry.failed {
-        return Err(OpenVinoUnavailable);
-    }
-    let outcome = (|| {
-        let input = entry
-            .input
-            .get_data_mut::<f32>()
-            .map_err(|e| diagnostics::failure("OpenVINO constant matmul I/O", e))?;
-        if input.len() != lhs.storage::<f32>().len() {
-            return Err(OpenVinoUnavailable);
-        }
-        input.copy_from_slice(lhs.storage::<f32>());
-        entry
-            .request
-            .infer()
-            .map_err(|e| diagnostics::failure("OpenVINO constant matmul inference", e))?;
-        diagnostics::executed(Target::Npu);
-        let output = entry
-            .request
-            .get_output_tensor_by_index(0)
-            .map_err(|e| diagnostics::failure("OpenVINO constant matmul I/O", e))?;
-        let data = output
-            .get_data::<f32>()
-            .map_err(|e| diagnostics::failure("OpenVINO constant matmul I/O", e))?;
-        if data.len() != m.checked_mul(n).ok_or(OpenVinoUnavailable)?
-            || super::range::max_abs(data).is_err()
-        {
-            return Err(OpenVinoUnavailable);
-        }
-        Ok(data.to_vec())
-    })();
-    if outcome.is_err() {
-        entry.failed = true;
-        drop(entry);
-        CACHE.mark_failed(&key, &cached);
-    }
-    let data = outcome?;
+    let data = super::cache::run_cached(
+        &CACHE,
+        key.clone(),
+        charge,
+        || compile(rhs, m, k, n),
+        |entry| {
+            let input = entry
+                .input
+                .get_data_mut::<f32>()
+                .map_err(|e| diagnostics::failure("OpenVINO constant matmul I/O", e))?;
+            if input.len() != lhs.storage::<f32>().len() {
+                return Err(OpenVinoUnavailable);
+            }
+            input.copy_from_slice(lhs.storage::<f32>());
+            entry
+                .request
+                .infer()
+                .map_err(|e| diagnostics::failure("OpenVINO constant matmul inference", e))?;
+            diagnostics::executed(Target::Npu);
+            let output = entry
+                .request
+                .get_output_tensor_by_index(0)
+                .map_err(|e| diagnostics::failure("OpenVINO constant matmul I/O", e))?;
+            let data = output
+                .get_data::<f32>()
+                .map_err(|e| diagnostics::failure("OpenVINO constant matmul I/O", e))?;
+            if data.len() != m.checked_mul(n).ok_or(OpenVinoUnavailable)?
+                || super::range::max_abs(data).is_err()
+            {
+                return Err(OpenVinoUnavailable);
+            }
+            Ok(data.to_vec())
+        },
+    )?;
     let mut shape = vec![1; rs.len().saturating_sub(ls.len())];
     shape.extend(ls.iter().copied());
     *shape.last_mut().unwrap() = n;
@@ -149,27 +152,41 @@ pub(super) fn matmul(
 }
 
 fn compile(rhs: &FlexTensor, m: usize, k: usize, n: usize) -> Result<Entry, OpenVinoUnavailable> {
+    use super::ir::{dims, edge, layer, net};
     use openvino::{Core, DeviceType, ElementType, Shape, Tensor};
     let size = rhs.bytes().len();
-    let xml = format!(
-        r#"<?xml version="1.0"?>
-<net name="constant_matmul" version="11"><layers>
-<layer id="0" name="lhs" type="Parameter" version="opset1">
-<data shape="{m},{k}" element_type="f32"/>
-<output><port id="0" precision="FP32" names="lhs"><dim>{m}</dim><dim>{k}</dim></port></output></layer>
-<layer id="1" name="weight" type="Const" version="opset1">
-<data shape="{k},{n}" element_type="f32" offset="0" size="{size}"/>
-<output><port id="0" precision="FP32"><dim>{k}</dim><dim>{n}</dim></port></output></layer>
-<layer id="2" name="mm" type="MatMul" version="opset1"><data transpose_a="false" transpose_b="false"/>
-<input><port id="0"><dim>{m}</dim><dim>{k}</dim></port><port id="1"><dim>{k}</dim><dim>{n}</dim></port></input>
-<output><port id="2" precision="FP32"><dim>{m}</dim><dim>{n}</dim></port></output></layer>
-<layer id="3" name="result" type="Result" version="opset1"><input><port id="0"><dim>{m}</dim><dim>{n}</dim></port></input></layer>
-</layers><edges>
-<edge from-layer="0" from-port="0" to-layer="2" to-port="0"/>
-<edge from-layer="1" from-port="0" to-layer="2" to-port="1"/>
-<edge from-layer="2" from-port="2" to-layer="3" to-port="0"/>
-</edges></net>"#
+    let mk = [m, k];
+    let kn = [k, n];
+    let mn = [m, n];
+    let mut layers = layer(
+        0,
+        "lhs",
+        "Parameter",
+        "opset1",
+        &format!(r#"shape="{m},{k}" element_type="f32""#),
+        &[],
+        Some(&mk),
     );
+    layers += &format!(
+        r#"<layer id="1" name="weight" type="Const" version="opset1"><data shape="{k},{n}" element_type="f32" offset="0" size="{size}"/><output><port id="0" precision="FP32">{}</port></output></layer>"#,
+        dims(&kn)
+    );
+    layers += &layer(
+        2,
+        "mm",
+        "MatMul",
+        "opset1",
+        r#"transpose_a="false" transpose_b="false""#,
+        &[&mk, &kn],
+        Some(&mn),
+    );
+    // Result layers omit the precision attribute the other ports carry.
+    layers += &format!(
+        r#"<layer id="3" name="result" type="Result" version="opset1"><input><port id="0">{}</port></input></layer>"#,
+        dims(&mn)
+    );
+    let edges = [edge(0, 0, 2, 0), edge(1, 0, 2, 1), edge(2, 2, 3, 0)].concat();
+    let xml = net("constant_matmul", &layers, &edges);
     let mut weights = Tensor::new(
         ElementType::U8,
         &Shape::new(&[size as i64]).map_err(|_| OpenVinoUnavailable)?,
@@ -180,15 +197,13 @@ fn compile(rhs: &FlexTensor, m: usize, k: usize, n: usize) -> Result<Entry, Open
         .map_err(|_| OpenVinoUnavailable)?
         .copy_from_slice(rhs.bytes());
     let mut core = Core::new().map_err(|_| OpenVinoUnavailable)?;
-    let model = core
-        .read_model_from_buffer(xml.as_bytes(), Some(&weights))
-        .map_err(|_| OpenVinoUnavailable)?;
-    let mut compiled = core.compile_model(&model, DeviceType::NPU).map_err(|err| {
-        if super::trace() {
-            eprintln!("OpenVINO constant matmul {m}x{k}x{n} unavailable: {err}");
-        }
-        diagnostics::failure("OpenVINO constant_matmul compilation", err)
-    })?;
+    let mut compiled = super::ir::compile_on_device(
+        &mut core,
+        &xml,
+        Some(&weights),
+        DeviceType::NPU,
+        "OpenVINO constant_matmul compilation",
+    )?;
     let request = compiled
         .create_infer_request()
         .map_err(|_| OpenVinoUnavailable)?;

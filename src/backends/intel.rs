@@ -100,10 +100,28 @@ struct OvCompiledMatmul {
 
 /// Load the OpenVINO shared library (required for runtime-linking feature).
 fn ensure_openvino_loaded() -> Result<(), OpenVinoUnavailable> {
-    if std::env::var("BURN_NPU_DISABLE").as_deref() == Ok("1") {
+    if disabled() {
         return Err(OpenVinoUnavailable);
     }
     load_openvino()
+}
+
+// Process flags, read once. Set them before the first backend call.
+pub(crate) fn disabled() -> bool {
+    static DISABLED: LazyLock<bool> =
+        LazyLock::new(|| std::env::var("BURN_NPU_DISABLE").as_deref() == Ok("1"));
+    *DISABLED
+}
+
+pub(crate) fn constant_weights() -> bool {
+    static CONSTANT: LazyLock<bool> =
+        LazyLock::new(|| std::env::var("BURN_NPU_CONSTANT_WEIGHTS").as_deref() == Ok("1"));
+    *CONSTANT
+}
+
+pub(crate) fn trace() -> bool {
+    static TRACE: LazyLock<bool> = LazyLock::new(|| std::env::var_os("BURN_NPU_TRACE").is_some());
+    *TRACE
 }
 
 pub(super) fn load_openvino() -> Result<(), OpenVinoUnavailable> {
@@ -199,24 +217,27 @@ pub fn openvino_matmul_flex(
     rhs: &burn_flex::FlexTensor,
 ) -> Result<burn_flex::FlexTensor, OpenVinoUnavailable> {
     use burn_tensor::TensorMetadata;
-    if std::env::var("BURN_NPU_DISABLE").as_deref() == Ok("1") {
+    if disabled() {
         return Err(OpenVinoUnavailable);
     }
     if lhs.dtype() != DType::F32 || rhs.dtype() != DType::F32 {
         return Err(OpenVinoUnavailable);
     }
-    let shape = lhs.shape();
-    let k = *shape.last().ok_or(OpenVinoUnavailable)?;
-    let bounds = (range::max_abs(lhs.storage::<f32>())?, range::rhs_max(rhs)?);
-    range::safe_matmul(k, bounds.0, bounds.1)?;
-    if std::env::var("BURN_NPU_CONSTANT_WEIGHTS").as_deref() == Ok("1") {
+    // Decline incompatible shapes before any copy or scan. Length agreement
+    // is rechecked on the contiguous copies inside the slices path.
+    let (ls, rs) = (lhs.shape(), rhs.shape());
+    admit_matmul(&ls, &rs, elements(&ls)?, elements(&rs)?)?;
+    if constant_weights() {
         ensure_openvino_loaded()?;
         if let Ok(output) = constant_matmul::matmul(lhs, rhs) {
             return Ok(output);
         }
     }
+    // Scan the contiguous copies the request actually reads, not the
+    // possibly strided views. The RHS bound stays cached across calls.
     let lhs = lhs.to_contiguous();
     let rhs = rhs.to_contiguous();
+    let bounds = (range::max_abs(lhs.storage::<f32>())?, range::rhs_max(&rhs)?);
     let output = openvino_matmul_slices(
         lhs.storage::<f32>(),
         &lhs.shape(),
@@ -238,71 +259,48 @@ fn openvino_matmul_slices(
     npu_only: bool,
     bounds: Option<(f64, f64)>,
 ) -> Result<IntelFloatTensor, OpenVinoUnavailable> {
-    let lhs_ndim = lhs_shape.len();
-    let rhs_ndim = rhs_shape.len();
-    if lhs_ndim < 2 || rhs_ndim < 2 {
-        return Err(OpenVinoUnavailable);
-    }
-
-    let m = lhs_shape[lhs_ndim - 2];
-    let k = lhs_shape[lhs_ndim - 1];
-    let n = rhs_shape[rhs_ndim - 1];
-
-    if rhs_shape[rhs_ndim - 2] != k || m == 0 || k == 0 || n == 0 {
-        return Err(OpenVinoUnavailable);
-    }
-
-    if elements(lhs_shape)? != lhs_data.len() || elements(rhs_shape)? != rhs_data.len() {
-        return Err(OpenVinoUnavailable);
-    }
+    // Cheap shape rejects precede every scan and copy.
+    let admitted = admit_matmul(lhs_shape, rhs_shape, lhs_data.len(), rhs_data.len())?;
     let (a, b) = match bounds {
         Some(bounds) => bounds,
         None => (range::max_abs(lhs_data)?, range::max_abs(rhs_data)?),
     };
-    range::safe_matmul(k, a, b)?;
+    range::safe_matmul(admitted.k, a, b)?;
 
-    // Compute batch dimensions: everything before the last 2 dims
-    let lhs_batch: Vec<usize> = lhs_shape[..lhs_ndim - 2].to_vec();
-    let rhs_batch: Vec<usize> = rhs_shape[..rhs_ndim - 2].to_vec();
-    let mut out_shape = vec![1; rhs_ndim.saturating_sub(lhs_ndim)];
-    out_shape.extend(lhs_batch.iter().copied());
-    out_shape.extend([m, n]);
-    // A shared RHS can multiply all contiguous LHS rows in one 2D graph.
-    let (batch_size, m) = if rhs_batch.iter().all(|&d| d == 1) {
-        (1, elements(&lhs_shape[..lhs_ndim - 1])?)
-    } else if lhs_batch == rhs_batch {
-        (elements(&lhs_batch)?, m)
-    } else {
-        return Err(OpenVinoUnavailable);
-    };
-    if batch_size == 0 {
-        return Err(OpenVinoUnavailable);
-    }
-    // Skip OpenVINO overhead for small matmuls.
-    if m.checked_mul(k)
-        .and_then(|v| v.checked_mul(n))
-        .ok_or(OpenVinoUnavailable)?
-        < 4096
-    {
-        return Err(OpenVinoUnavailable);
-    }
-
-    let lhs_stride = m.checked_mul(k).ok_or(OpenVinoUnavailable)?;
-    let rhs_stride = k.checked_mul(n).ok_or(OpenVinoUnavailable)?;
-    let out_stride = m.checked_mul(n).ok_or(OpenVinoUnavailable)?;
-    let batch_lhs = batch_size
+    let lhs_stride = admitted
+        .m
+        .checked_mul(admitted.k)
+        .ok_or(OpenVinoUnavailable)?;
+    let rhs_stride = admitted
+        .k
+        .checked_mul(admitted.n)
+        .ok_or(OpenVinoUnavailable)?;
+    let out_stride = admitted
+        .m
+        .checked_mul(admitted.n)
+        .ok_or(OpenVinoUnavailable)?;
+    let batch_lhs = admitted
+        .batch_size
         .checked_mul(lhs_stride)
         .ok_or(OpenVinoUnavailable)?;
-    let batch_rhs = batch_size
+    let batch_rhs = admitted
+        .batch_size
         .checked_mul(rhs_stride)
         .ok_or(OpenVinoUnavailable)?;
-    let batch_out = batch_size
+    let batch_out = admitted
+        .batch_size
         .checked_mul(out_stride)
         .ok_or(OpenVinoUnavailable)?;
 
     // Cache hits also execute native functions on this calling thread.
     ensure_openvino_loaded()?;
-    let cache_key = (batch_size, m, k, n, npu_only);
+    let cache_key = (
+        admitted.batch_size,
+        admitted.m,
+        admitted.k,
+        admitted.n,
+        npu_only,
+    );
     let charge = lhs_data
         .len()
         .checked_add(rhs_data.len())
@@ -310,7 +308,14 @@ fn openvino_matmul_slices(
         .and_then(|v| v.checked_mul(4))
         .ok_or(OpenVinoUnavailable)?;
     let cached = OV_CACHE.get_or_try_init(cache_key, charge, || {
-        compile_matmul(batch_size, m, k, n, npu_only).map(Mutex::new)
+        compile_matmul(
+            admitted.batch_size,
+            admitted.m,
+            admitted.k,
+            admitted.n,
+            npu_only,
+        )
+        .map(Mutex::new)
     })?;
     let mut entry = cached.lock().map_err(|_| OpenVinoUnavailable)?;
     if entry.failed {
@@ -358,7 +363,73 @@ fn openvino_matmul_slices(
     }
     let result_data = outcome?;
 
-    Ok(IntelFloatTensor::new(result_data, out_shape))
+    Ok(IntelFloatTensor::new(result_data, admitted.out_shape))
+}
+
+/// Shape-only admission for matmul: rank, zero dims, length agreement,
+/// batch compatibility and the small-matmul floor. No scans or copies.
+struct AdmittedMatmul {
+    batch_size: usize,
+    m: usize,
+    k: usize,
+    n: usize,
+    out_shape: Vec<usize>,
+}
+
+fn admit_matmul(
+    lhs_shape: &[usize],
+    rhs_shape: &[usize],
+    lhs_len: usize,
+    rhs_len: usize,
+) -> Result<AdmittedMatmul, OpenVinoUnavailable> {
+    let lhs_ndim = lhs_shape.len();
+    let rhs_ndim = rhs_shape.len();
+    if lhs_ndim < 2 || rhs_ndim < 2 {
+        return Err(OpenVinoUnavailable);
+    }
+    let (m, k, n) = (
+        lhs_shape[lhs_ndim - 2],
+        lhs_shape[lhs_ndim - 1],
+        rhs_shape[rhs_ndim - 1],
+    );
+    if rhs_shape[rhs_ndim - 2] != k || m == 0 || k == 0 || n == 0 {
+        return Err(OpenVinoUnavailable);
+    }
+    if elements(lhs_shape)? != lhs_len || elements(rhs_shape)? != rhs_len {
+        return Err(OpenVinoUnavailable);
+    }
+    let lhs_batch = &lhs_shape[..lhs_ndim - 2];
+    let rhs_batch = &rhs_shape[..rhs_ndim - 2];
+    let mut out_shape = vec![1; rhs_ndim.saturating_sub(lhs_ndim)];
+    out_shape.extend(lhs_batch.iter().copied());
+    out_shape.extend([m, n]);
+    // A shared RHS can multiply all contiguous LHS rows in one 2D graph.
+    // Only admitted broadcast; the shape math below depends on it.
+    let (batch_size, m) = if rhs_batch.iter().all(|&d| d == 1) {
+        (1, elements(&lhs_shape[..lhs_ndim - 1])?)
+    } else if lhs_batch == rhs_batch {
+        (elements(lhs_batch)?, m)
+    } else {
+        return Err(OpenVinoUnavailable);
+    };
+    if batch_size == 0 {
+        return Err(OpenVinoUnavailable);
+    }
+    // Skip OpenVINO overhead for small matmuls.
+    if m.checked_mul(k)
+        .and_then(|v| v.checked_mul(n))
+        .ok_or(OpenVinoUnavailable)?
+        < 4096
+    {
+        return Err(OpenVinoUnavailable);
+    }
+    Ok(AdmittedMatmul {
+        batch_size,
+        m,
+        k,
+        n,
+        out_shape,
+    })
 }
 
 fn compile_matmul(
@@ -431,7 +502,7 @@ fn compile_matmul(
         }
         match core.compile_model(&model, dev.to_owned()) {
             Ok(c) => {
-                if std::env::var_os("BURN_NPU_TRACE").is_some() {
+                if trace() {
                     eprintln!(
                         "OpenVINO matmul batch={batch_size} {m}x{k}x{n}: compiled on {dev:?}"
                     );

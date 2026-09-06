@@ -184,7 +184,7 @@ fn compile(rhs: &FlexTensor, m: usize, k: usize, n: usize) -> Result<Entry, Open
         .read_model_from_buffer(xml.as_bytes(), Some(&weights))
         .map_err(|_| OpenVinoUnavailable)?;
     let mut compiled = core.compile_model(&model, DeviceType::NPU).map_err(|err| {
-        if std::env::var_os("BURN_NPU_TRACE").is_some() {
+        if super::trace() {
             eprintln!("OpenVINO constant matmul {m}x{k}x{n} unavailable: {err}");
         }
         diagnostics::failure("OpenVINO constant_matmul compilation", err)
@@ -193,7 +193,7 @@ fn compile(rhs: &FlexTensor, m: usize, k: usize, n: usize) -> Result<Entry, Open
         .create_infer_request()
         .map_err(|_| OpenVinoUnavailable)?;
     let input = request.get_tensor("lhs").map_err(|_| OpenVinoUnavailable)?;
-    if std::env::var_os("BURN_NPU_TRACE").is_some() {
+    if super::trace() {
         eprintln!("OpenVINO constant matmul {m}x{k}x{n}: compiled on NPU");
     }
     Ok(Entry {

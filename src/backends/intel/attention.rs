@@ -9,7 +9,7 @@ use burn_flex::FlexTensor;
 use burn_tensor::{ops::AttentionModuleOptions, DType, TensorData, TensorMetadata};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
-static CACHE: LazyLock<BuildCache<Vec<usize>, Mutex<Entry>>> =
+static CACHE: LazyLock<BuildCache<[usize; 17], Mutex<Entry>>> =
     LazyLock::new(|| BuildCache::new(16, 64 * 1024 * 1024, Duration::from_secs(30)));
 pub(super) fn stats() -> CacheStats {
     CACHE.stats()
@@ -95,14 +95,15 @@ pub(super) fn execute(
         return Err(OpenVinoUnavailable);
     }
     super::range::safe_attention(q, k, v, &bias_contiguous, scale)?;
-    let mut key = Vec::new();
-    for s in [&qs, &ks, &vs, &bs] {
-        key.extend(s.iter().copied());
+    // Materialize outside the entry lock: same-shape callers serialize on it.
+    let inputs: Vec<FlexTensor> = [q, k, v, bias].iter().map(|t| t.to_contiguous()).collect();
+    let mut key = [0usize; 17];
+    for (i, s) in [&qs[..], &ks[..], &vs[..], &bs[..]].iter().enumerate() {
+        key[i * 4..i * 4 + 4].copy_from_slice(s);
     }
-    key.push(scale.to_bits() as usize);
-    let shapes = vec![qs.to_vec(), ks.to_vec(), vs.to_vec(), bs.to_vec(), vec![1]];
+    key[16] = scale.to_bits() as usize;
     let out = vec![qs[0], qs[1], qs[2], vs[3]];
-    let count = shapes
+    let count = [&qs, &ks, &vs, &bs]
         .iter()
         .try_fold(super::elements(&out)?, |count, shape| {
             count
@@ -110,16 +111,21 @@ pub(super) fn execute(
                 .ok_or(OpenVinoUnavailable)
         })?;
     let charge = count.checked_mul(4).ok_or(OpenVinoUnavailable)?;
-    let cached = CACHE.get_or_try_init(key.clone(), charge, || {
-        compile(&shapes, &score, &out, scale).map(Mutex::new)
+    let cached = CACHE.get_or_try_init(key, charge, || {
+        compile(
+            &[qs.to_vec(), ks.to_vec(), vs.to_vec(), bs.to_vec(), vec![1]],
+            &score,
+            &out,
+            scale,
+        )
+        .map(Mutex::new)
     })?;
     let mut entry = cached.lock().map_err(|_| OpenVinoUnavailable)?;
     if entry.failed {
         return Err(OpenVinoUnavailable);
     }
     let outcome = (|| {
-        for (i, tensor) in [q, k, v, bias].iter().enumerate() {
-            let contiguous = tensor.to_contiguous();
+        for (i, contiguous) in inputs.iter().enumerate() {
             let input = entry.inputs[i]
                 .get_data_mut::<f32>()
                 .map_err(|e| diagnostics::failure("OpenVINO attention I/O", e))?;
@@ -347,7 +353,7 @@ fn compile(
         .read_model_from_buffer(xml.as_bytes(), None)
         .map_err(|_| OpenVinoUnavailable)?;
     let mut compiled = core.compile_model(&model, DeviceType::NPU).map_err(|err| {
-        if std::env::var_os("BURN_NPU_TRACE").is_some() {
+        if super::trace() {
             eprintln!("OpenVINO attention compilation unavailable: {err}");
         }
         diagnostics::failure("OpenVINO attention compilation", err)
@@ -365,7 +371,7 @@ fn compile(
     inputs[4]
         .get_data_mut::<f32>()
         .map_err(|_| OpenVinoUnavailable)?[0] = scale;
-    if std::env::var_os("BURN_NPU_TRACE").is_some() {
+    if super::trace() {
         eprintln!("OpenVINO fused attention {:?}: compiled on NPU", shapes[0]);
     }
     Ok(Entry {

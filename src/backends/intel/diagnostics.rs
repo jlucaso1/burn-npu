@@ -54,7 +54,7 @@ pub(super) fn failure(context: &str, error: impl Display) -> OpenVinoUnavailable
     let message = format!("{context}: {error}");
     ERRORS.fetch_add(1, Ordering::Relaxed);
     *LAST_ERROR.lock().unwrap_or_else(|e| e.into_inner()) = Some(message.clone());
-    if std::env::var_os("BURN_NPU_TRACE").is_some() {
+    if super::trace() {
         eprintln!("{message}");
     }
     OpenVinoUnavailable

@@ -776,7 +776,7 @@ impl ModuleOps<Self> for NpuBurnBackend {
             ) {
                 return output;
             }
-            if std::env::var_os("BURN_NPU_TRACE").is_some() {
+            if crate::backends::intel::trace() {
                 eprintln!("OpenVINO attention unavailable; Flex CPU fallback");
             }
         }

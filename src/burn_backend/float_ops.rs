@@ -914,7 +914,7 @@ impl FloatTensorOps<Self> for NpuBurnBackend {
                 return output;
             }
             crate::backends::intel::diagnostics::fallback();
-            if std::env::var_os("BURN_NPU_TRACE").is_some() {
+            if crate::backends::intel::trace() {
                 use burn_tensor::TensorMetadata;
                 eprintln!(
                     "OpenVINO unavailable for {:?} x {:?} ({:?}); Flex CPU fallback",
